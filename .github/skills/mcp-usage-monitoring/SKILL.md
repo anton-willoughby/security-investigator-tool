@@ -1,6 +1,8 @@
 ---
 name: mcp-usage-monitoring
 description: 'Use this skill when asked to monitor, audit, or analyze MCP (Model Context Protocol) server usage in the environment. Triggers on keywords like "MCP usage", "MCP server monitoring", "MCP activity", "Graph MCP", "Sentinel MCP", "Azure MCP", "MCP audit", "tool usage monitoring", "MCP breakdown", "who is using MCP", or when investigating MCP user activity, Graph API calls from MCP servers, or workspace query governance. This skill provides comprehensive MCP server telemetry analysis across Graph MCP, Sentinel MCP, and Azure MCP servers including usage trends, endpoint access patterns, user attribution, cross-server user analysis, sensitive API detection, workspace query governance, and security risk assessment with inline and markdown file reporting.'
+threat_pulse_domains: [admin]
+drill_down_prompt: 'Run MCP usage monitoring report — Graph/Sentinel/Azure MCP activity, user attribution'
 ---
 
 # MCP Server Usage Monitoring — Instructions
@@ -1166,7 +1168,8 @@ let triage_mcp = MicrosoftGraphActivityLogs
 let datalake_mcp = CloudAppEvents
 | where Timestamp > ago(lookback)
 | where ActionType contains "Sentinel" or ActionType contains "KQL"
-| where tostring(RawEventData) has "InterfaceNotProvided"
+| extend RawData = parse_json(tostring(RawEventData))
+| where tostring(RawData.Interface) == "InterfaceNotProvided" or isempty(tostring(RawData.Interface))
 | where isnotempty(AccountObjectId)
 | summarize Calls = count() by UserId = AccountObjectId
 | project UserId, Server = "Data Lake MCP", Calls;
@@ -1190,7 +1193,7 @@ union graph_mcp, triage_mcp, datalake_mcp, azure_mcp
 ```
 
 **⚠️ Pitfall-aware:**
-- **Data Lake MCP leg:** Uses `ActionType contains` (not `has`) per the [CamelCase pitfall](#cloudappevents-camelcase-matching-actiontype-and-operation). Uses `InterfaceNotProvided` proxy signal when RecordType 403 is unavailable (see [Phase 3 Known Limitation](#phase-3-sentinel-data-lake-mcp-analysis)).
+- **Data Lake MCP leg:** Uses `ActionType contains` (not `has`) per the [CamelCase pitfall](#cloudappevents-camelcase-matching-actiontype-and-operation). Parses `RawEventData` once and filters on `Interface` field for the `InterfaceNotProvided` proxy signal when RecordType 403 is unavailable (see [Phase 3 Known Limitation](#phase-3-sentinel-data-lake-mcp-analysis)).
 - **Azure CLI/MCP leg:** Uses shared AppId `04b07795` — includes both Azure MCP Server and manual `az` CLI sign-ins. Cannot distinguish at this level.
 - **UPN resolution:** Joins with SigninLogs to resolve `UserId` GUIDs to human-readable UPNs. Users with no recent sign-ins will show their GUID instead.
 - **CloudAppEvents timestamp:** Uses `Timestamp` (not `TimeGenerated`) since this runs via Advanced Hunting.

@@ -5,6 +5,7 @@
 **Tables:** DeviceProcessEvents  
 **Keywords:** rare process, parent child, process chain, LOLBin, discovery, reconnaissance, threat hunting, Pareto, process tree, ipconfig, whoami, unusual execution  
 **MITRE:** T1016, T1033, T1057, T1059, T1087, TA0007, TA0002  
+**Domains:** endpoint  
 **Timeframe:** Last 90 days (configurable)
 
 ---
@@ -35,6 +36,18 @@ This collection contains KQL queries for **threat hunting rare parent–child pr
 | `python3.8 → wdavdaemonclient` | MDE health check on Linux |
 
 ---
+
+## Quick Reference — Query Index
+
+| # | Query | Use Case | Key Table |
+|---|-------|----------|-----------|
+| 1 | [Rare Parent–Child Combos with Context (< 5 in 90 days)](#query-1-rare-parentchild-combos-with-context--5-in-90-days) | Investigation | `DeviceProcessEvents` |
+| 2 | [Pareto Distribution — Ranked Parent–Child Combos with Cumulative %](#query-2-pareto-distribution--ranked-parentchild-combos-with-cumulative-) | Investigation | `DeviceProcessEvents` + `TotalEvents` |
+| 3 | [Pareto Summary Statistics](#query-3-pareto-summary-statistics) | Dashboard | `DeviceProcessEvents` + multi |
+| 4 | [Find a Specific Parent–Child Combo's Rank](#query-4-find-a-specific-parentchild-combos-rank) | Investigation | `DeviceProcessEvents` |
+| 5 | [Rare Recon/Discovery Combos (Security-Focused Filter)](#query-5-rare-recondiscovery-combos-security-focused-filter) | Investigation | `DeviceProcessEvents` |
+| 6 | [Rare Combos Excluding Known Benign Noise](#query-6-rare-combos-excluding-known-benign-noise) | Investigation | `DeviceProcessEvents` |
+
 
 ## Query 1: Rare Parent–Child Combos with Context (< 5 in 90 days)
 

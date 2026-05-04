@@ -1,6 +1,8 @@
 ---
 name: data-security-analysis
 description: 'Use this skill when asked to analyze data security events, sensitive information type (SIT) access patterns, sensitivity label access patterns, DLP policy matches, or Purview insider risk activity. Triggers on keywords like "data security", "sensitive information type", "SIT access", "who accessed sensitive data", "DLP events", "DataSecurityEvents", "EDM access", "exact data match", "credit card access", "sensitive file access", "insider risk activity", "Purview data security", "SIT breakdown", "classify access", "sensitivity label", "labeled documents", "label downgrade", "label change", "Copilot label exposure", or when investigating which users accessed documents containing specific sensitive information types or sensitivity labels. This skill queries DataSecurityEvents in Advanced Hunting to produce comprehensive SIT and sensitivity label access analysis including volume breakdowns, user-level drill-downs, file inventories, action type distribution, DLP policy correlation, label change tracking, Copilot label exposure, temporal patterns, and risk-ranked user summaries. Supports inline chat and markdown file output. Designed for large environments (100k+ users) with aggressive summarization and tiered drill-down.'
+threat_pulse_domains: [admin, cloud]
+drill_down_prompt: 'Analyze data security events — SIT access patterns, label changes, DLP policy matches'
 ---
 
 # Data Security Events Analysis — Instructions
@@ -37,6 +39,22 @@ This skill analyzes **DataSecurityEvents** (Microsoft Purview Insider Risk Manag
 9. **[Known Pitfalls](#known-pitfalls)** - Table quirks and edge cases (27 entries)
 10. **[Error Handling](#error-handling)** - Troubleshooting guide
 11. **[SVG Dashboard Generation](#svg-dashboard-generation)** - Visual dashboard from report data
+
+**Investigation shortcuts:**
+- **DLP/exfiltration incident entities** (TP Q1): **Q3** (top users by SIT volume) → **Q6** (DLP policy matches) → **Q9** (single-user SIT profile for each incident entity) → **Q10b** (file-based spikes)
+- **High-volume mailbox API access** (TP Q9): **Q9** (single-user SIT profile for API actors) → **Q4** (top files accessed) → **Q10b** (file-based spikes) → **Q6** (DLP policy matches)
+- **Risky identity with data access** (TP Q3): **Q9** (single-user SIT profile) → **Q4** (top files) → **Q13** (label downgrade/changes by user)
+- **Copilot sensitive data exposure** (TP Q1 Copilot incidents, or TP Q10 AppRegistration with AI keywords): **Q16a** (Copilot SIT landscape + agent/human split) → **Q16b** (top human users, high-priority SITs) → **Q16d** (prompt-only risk signal)
+- **Label compliance / downgrade alert** (TP Q1 label-related incidents): **Q13** (label changes) → **Q15** (label-only events) → **Q14** (Copilot label exposure)
+- **Tenant-wide data security posture** (standalone, no TP trigger): Full Phase 1–5 workflow
+
+> **⛔ Shortcut Default Rule:** When a matching shortcut exists for the investigation context, **use it** — don't run the full workflow. Only run the full Phase 1-5 sequence when the user explicitly requests "full analysis", "comprehensive", or "tenant-wide overview". Shortcuts render only the report sections relevant to their query chain (plus Executive Summary and Recommendations, always).
+
+### When invoked from a parent skill (threat-pulse, incident-investigation, user-investigation):
+- Inherit the workspace selection from the parent investigation context
+- **Skip output mode prompts** — default to inline chat (the parent skill controls the final output format)
+- Match the TP Q# trigger to the shortcuts above and execute that chain with entity substitution
+- Use **30d lookback** (AH default) unless the parent specifies otherwise
 
 ---
 

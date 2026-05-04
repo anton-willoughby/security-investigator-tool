@@ -1,6 +1,6 @@
 # 🔒 Security Investigation Automation System
 
-**Comprehensive, automated security investigations powered by Microsoft Sentinel, Defender XDR, Graph API, and threat intelligence — with 22 specialized Agent Skills**
+**Comprehensive, automated security investigations powered by Microsoft Sentinel, Defender XDR, Graph API, and threat intelligence — with 25 specialized Agent Skills**
 
 > 📺 **Video Walkthrough:** See this project in action — [Watch on YouTube](https://youtu.be/3UFqWA4cmoE?t=1470) (starts at the Security Investigator demo). Covers the end-to-end workflow: natural language investigations, MCP server integration, KQL query execution, threat intelligence enrichment, and automated report generation.
 
@@ -30,14 +30,23 @@ copy .env.template .env
 copy .vscode\mcp.json.template .vscode\mcp.json
 # All platform servers are pre-configured — just needs a GitHub PAT on first use
 
-# 5. Open Copilot Chat (Ctrl+Shift+I) in Agent mode and ask:
-#    "What skills do you have access to?"
-#    "Investigate user@domain.com for the last 7 days"
+# 5. Open Copilot Chat (Ctrl+Shift+I) in Agent mode and start with:
+#    "Run a threat pulse scan"
+```
+
+**🚀 Recommended first run:** The **Threat Pulse** skill is the best starting point. It runs a broad-spectrum scan across 9 security domains (incidents, identity, endpoint, exposure, email, UEBA, auth spray, privileged ops, CVEs) and produces prioritized findings with color-coded verdicts (🔴 Escalate / 🟠 Investigate / 🟡 Monitor / ✅ Clear). Each finding includes a drill-down recommendation pointing to a specialized skill — so after the scan, you'll know exactly where to focus and which follow-up command to run.
+
+**Other example prompts:**
+```
+"Investigate user@domain.com for the last 7 days"    → user-investigation
+"Analyze incident 12345"                              → incident-investigation
+"Is this IP malicious? 203.0.113.42"                  → ioc-investigation
+"What skills do you have access to?"                  → lists all 25 skills
 ```
 
 **For detailed workflows and KQL queries:**
 → [.github/copilot-instructions.md](.github/copilot-instructions.md) (universal patterns, skill detection)
-→ [.github/skills/](.github/skills/) (22 specialized investigation workflows)
+→ [.github/skills/](.github/skills/) (25 specialized investigation workflows)
 → [queries/](queries/) (verified KQL query library)
 
 ---
@@ -52,7 +61,7 @@ copy .vscode\mcp.json.template .vscode\mcp.json
 │            (Skill detection, universal patterns, routing)          │
 ├────────────────────────────────────────────────────────────────────┤
 │                     .github/skills/*.md                            │
-│       (22 specialized workflows with KQL, risk assessment)         │
+│       (25 specialized workflows with KQL, risk assessment)         │
 ├────────────────────────────────────────────────────────────────────┤
 │                     MCP Servers (Platform)                         │
 │  ┌─────────────┐  ┌──────────────┐  ┌───────────────────────────┐  │
@@ -80,32 +89,10 @@ copy .vscode\mcp.json.template .vscode\mcp.json
 ```
 
 **Key Components:**
-- **22 Agent Skills** — Modular investigation workflows for incidents, users, devices, IoCs, authentication, scope drift (SPN/User/Device), MCP monitoring, exposure management, AI agent posture, identity posture, data security analysis, email threat posture, ingestion analysis, detection authoring, SVG dashboards, and more
+- **25 Agent Skills** — Modular investigation workflows for incidents, users, devices, IoCs, authentication, scope drift (SPN/User/Device), MCP monitoring, exposure management, AI agent posture, app registration posture, identity posture, data security analysis, email threat posture, MITRE ATT&CK coverage, ingestion analysis, detection authoring, threat pulse scanning, SVG dashboards, and more
 - **7 MCP Server Integrations** — Sentinel Data Lake, Graph API, Defender XDR Triage, KQL Search, Microsoft Learn, Azure MCP Server, Sentinel Graph (private preview)
 - **3 Local MCP Apps** — Interactive heatmaps, geographic attack maps, incident commenting
 - **Python Utilities** — HTML report generation with IP enrichment (geolocation, VPN detection, abuse scores, Shodan port/service/CVE intelligence)
-
----
-
-## Capabilities
-
-- **Incident Triage** — Analyze Defender XDR and Sentinel incidents with entity extraction and recursive investigation
-- **User Investigation** — Sign-in anomalies, MFA status, device compliance, Identity Protection, HTML reports
-- **Device Investigation** — Defender alerts, vulnerabilities, logged-on users, process/network/file events
-- **IoC Analysis** — IP addresses, domains, URLs, file hashes with threat intelligence correlation
-- **Honeypot Analysis** — Attack patterns, threat intel, vulnerability assessment, executive reports
-- **KQL Query Authoring** — Schema-validated query generation with community examples
-- **Authentication Forensics** — SessionId tracing, token reuse vs MFA, geographic anomalies
-- **CA Policy Investigation** — Conditional Access failures, policy bypass detection
-- **Scope Drift Detection** — 90-day behavioral baseline vs 7-day comparison for service principals, user accounts, and devices (3 specialized sub-skills)
-- **MCP Usage Monitoring** — Graph MCP, Sentinel MCP, Azure MCP server audit with behavioral baselines, anomaly detection, and composite scoring
-- **Email Threat Posture** — Defender for Office 365 reporting: inbound mail flow, threat composition (phishing/spam/malware), email authentication (DMARC/DKIM/SPF), ZAP post-delivery remediation, Safe Links click protection, attachment analysis, MDO incident summary, Email Protection Score
-- **Ingestion & Cost Analysis** — Table-level volume breakdown, tier classification, anomaly detection, analytic rule inventory, license benefit analysis, migration candidates
-- **Custom Detection Authoring** — Create, deploy, update, and manage Defender XDR custom detection rules via Graph API with manifest-driven batch deployment
-- **AI Agent Posture Audit** — Agent inventory, authentication gaps, MCP tool proliferation, knowledge source exposure, XPIA risk, Agent Security Score for Copilot Studio and M365 Copilot agents
-- **Identity Posture Report** — Multi-provider account inventory, privileged account audit, stale/deleted account hygiene, password posture, risk distribution, multi-provider identity linking, Identity Posture Score
-- **Data Security Analysis** — Sensitive information type (SIT) access patterns, DLP policy correlation, insider risk triage, EDM monitoring, file-based risk ranking, spike detection across DataSecurityEvents
-- **Visualizations** — Interactive heatmaps, geographic attack maps, and SVG data dashboards
 
 ---
 
@@ -113,10 +100,11 @@ copy .vscode\mcp.json.template .vscode\mcp.json
 
 This system uses **[VS Code Agent Skills](https://code.visualstudio.com/docs/copilot/customization/agent-skills)** to provide modular, domain-specific investigation workflows. Skills are automatically detected based on keywords in your prompts.
 
-### Available Skills (22)
+### Available Skills (25)
 
 | Category | Skill | Description | Trigger Keywords |
 |----------|-------|-------------|------------------|
+| ⚡ Quick Scan | **[threat-pulse](/.github/skills/threat-pulse/SKILL.md)** | Rapid broad-spectrum security scan across 7 domains: active incidents, identity (human + NHI), endpoint, email threats, admin & cloud ops, exposure. Prioritized Threat Pulse findings with color-coded verdicts and drill-down recommendations | "threat pulse", "quick scan", "security pulse", "morning hunt", "what can you do", "where do I start", "what's going on" |
 | 🔍 Core Investigation | **[computer-investigation](/.github/skills/computer-investigation/SKILL.md)** | Device security analysis for Entra Joined, Hybrid Joined, and Entra Registered devices: Defender alerts, compliance, logged-on users, vulnerabilities, process/network/file events | "investigate computer", "investigate device", "investigate endpoint", "check machine", hostname |
 | 🔍 Core Investigation | **[honeypot-investigation](/.github/skills/honeypot-investigation/SKILL.md)** | Honeypot security analysis: attack patterns, threat intel, vulnerabilities, executive reports | "honeypot", "attack analysis", "threat actor" |
 | 🔍 Core Investigation | **[incident-investigation](/.github/skills/incident-investigation/SKILL.md)** | Comprehensive incident analysis for Defender XDR and Sentinel incidents: criticality assessment, entity extraction, filtering, recursive entity investigation | "investigate incident", "incident ID", "analyze incident", "triage incident", incident number |
@@ -129,6 +117,7 @@ This system uses **[VS Code Agent Skills](https://code.visualstudio.com/docs/cop
 | 📈 Behavioral Analysis | **[scope-drift-detection/user](/.github/skills/scope-drift-detection/user/SKILL.md)** | User scope drift: 90-day baseline vs 7-day comparison, dual Drift Scores (7-dim interactive + 6-dim non-interactive), correlated with AuditLogs, SecurityAlert, Identity Protection, CloudAppEvents, EmailEvents | "user drift", "user scope drift", "user behavioral change", "UPN drift" |
 | 🛡️ Posture & Exposure | **[exposure-investigation](/.github/skills/exposure-investigation/SKILL.md)** | Vulnerability & Exposure Management reporting: CVE assessment with exploit/CVSS data, security configuration compliance, end-of-support software, ExposureGraph critical assets, attack paths, Defender health, certificate status | "vulnerability report", "exposure report", "CVE assessment", "security posture", "TVM" |
 | 🛡️ Posture & Exposure | **[ai-agent-posture](/.github/skills/ai-agent-posture/SKILL.md)** | AI agent security posture audit for Copilot Studio and M365 Copilot agents: agent inventory, authentication gaps, access control misconfigurations, MCP tool proliferation, knowledge source exposure, XPIA risk, credential detection, Agent Security Score | "AI agent posture", "agent security audit", "Copilot Studio agents", "agent inventory", "unauthenticated agents", "agent sprawl" |
+| 🛡️ Posture & Exposure | **[app-registration-posture](/.github/skills/app-registration-posture/SKILL.md)** | App registration and service principal security posture: Graph API permission inventory (dangerous grants, permission concentration), app ownership risk, credential hygiene (stale secrets, multi-credential apps), cross-tenant SPN exposure, KQL attack chain detection (AuditLogs, AADServicePrincipalSignInLogs, MicrosoftGraphActivityLogs), App Permission Risk Score with 5 dimensions | "app registration posture", "app registration abuse", "service principal permissions", "dangerous app permissions", "app ownership", "overprivileged apps" |
 | 🛡️ Posture & Exposure | **[email-threat-posture](/.github/skills/email-threat-posture/SKILL.md)** | Email threat protection posture report for Microsoft Defender for Office 365: inbound mail flow overview, threat composition (phishing/spam/malware), email authentication (DMARC/DKIM/SPF/CompAuth), ZAP post-delivery remediation, Safe Links click protection, attachment analysis, detection method breakdown, MDO security incidents, Email Protection Score with 5 dimensions. Inline chat, markdown file, and SVG dashboard output | "email threat report", "email security posture", "phishing report", "MDO report", "Defender for Office 365 report", "ZAP effectiveness", "Safe Links report", "DMARC report" |
 | 🛡️ Posture & Exposure | **[identity-posture](/.github/skills/identity-posture/SKILL.md)** | Identity security posture report using IdentityAccountInfo (MDI/Advanced Hunting): multi-provider account inventory (Entra ID, AD, Okta, SailPoint, CyberArk, Ping), privileged account audit with role distribution, stale/disabled/deleted account hygiene, password posture, risk distribution, multi-provider identity linking, MDI tag analysis, Identity Posture Score with 5 dimensions. Inline chat and markdown file output | "identity posture", "identity security report", "account hygiene", "stale accounts", "privileged accounts", "password posture", "identity providers", "honeytoken" |
 | 🔒 Data Security | **[data-security-analysis](/.github/skills/data-security-analysis/SKILL.md)** | DataSecurityEvents (Purview/IRM) analysis: SIT access breakdowns, user risk ranking, file inventory, DLP policy correlation, Copilot SIT exposure, SIT GUID-to-name resolution, anomaly detection. Designed for 100k+ user environments | "data security", "sensitive information type", "SIT access", "DLP events", "DataSecurityEvents", "EDM access", "insider risk activity", "Purview data security" |
@@ -139,6 +128,7 @@ This system uses **[VS Code Agent Skills](https://code.visualstudio.com/docs/cop
 | 🔧 Tooling & Monitoring | **[kql-query-authoring](/.github/skills/kql-query-authoring/SKILL.md)** | KQL query creation using schema validation, community examples, Microsoft Learn | "write KQL", "create KQL query", "help with KQL", "query [table]" |
 | 🔧 Tooling & Monitoring | **[mcp-usage-monitoring](/.github/skills/mcp-usage-monitoring/SKILL.md)** | MCP server usage monitoring and audit: Graph MCP endpoint analysis, Sentinel MCP auth events, Azure MCP ARM operations, workspace query governance, MCP Usage Score with 5 health/risk dimensions | "MCP usage", "MCP server monitoring", "MCP activity", "MCP audit", "Graph MCP", "Sentinel MCP", "Azure MCP" |
 | 🔧 Tooling & Monitoring | **[sentinel-ingestion-report](/.github/skills/sentinel-ingestion-report/SKILL.md)** | Sentinel workspace ingestion & cost analysis: table-level volume breakdown, tier classification (Analytics/Basic/Data Lake), SecurityEvent/Syslog/CommonSecurityLog deep dives, ingestion anomaly detection, analytic rule inventory via REST API, custom detection inventory via Graph API, rule health via SentinelHealth, data lake tier migration candidates, license benefit analysis (DfS P2, M365 E5) | "ingestion report", "usage report", "data volume", "cost analysis", "table breakdown", "data lake tier", "ingestion anomaly", "cost optimization" |
+| 🔧 Tooling & Monitoring | **[mitre-coverage-report](/.github/skills/mitre-coverage-report/SKILL.md)** | MITRE ATT&CK coverage analysis: YAML-driven PowerShell pipeline gathers analytic rule MITRE tags, custom detection techniques, SOC Optimization recommendations, alert/incident operational data. Tactic-level coverage matrix, technique-level drill-down with rule mapping, coverage gap identification, SOC Optimization threat scenario alignment, untagged rule remediation, MITRE Coverage Score (5 weighted dimensions). Inline chat and markdown file output | "MITRE coverage", "ATT&CK coverage", "MITRE report", "tactic coverage", "technique coverage", "coverage gaps", "MITRE score", "detection coverage report", "MITRE matrix" |
 
 ### How Skills Work
 
@@ -166,17 +156,15 @@ You don't need to mention the skill name — keywords are detected automatically
 | "Check user behavioral drift for user@domain.com" | scope-drift-detection/user |
 | "Analyze device process drift across the fleet" | scope-drift-detection/device |
 | "Show me MCP server usage for the last 30 days" | mcp-usage-monitoring |
-| "Generate a Sentinel ingestion report for the last 30 days" | sentinel-ingestion-report |
+| "Generate a Sentinel ingestion report" | sentinel-ingestion-report |
 | "Create custom detections for Event ID 4799" | detection-authoring |
-| "Deploy these detection rules to Defender XDR" | detection-authoring |
 | "Audit AI agent security posture" | ai-agent-posture |
-| "Show me unauthenticated Copilot Studio agents" | ai-agent-posture |
 | "Who accessed files with credit card numbers?" | data-security-analysis |
-| "Run a data security analysis for the last 30 days" | data-security-analysis |
 | "Generate an email threat protection report" | email-threat-posture |
-| "What's our phishing delivery rate for the last 30 days?" | email-threat-posture |
-| "Run an identity posture report for the last 30 days" | identity-posture |
-| "Show me stale accounts and privileged account hygiene" | identity-posture |
+| "Run an identity posture report" | identity-posture |
+| "Generate a MITRE ATT&CK coverage report" | mitre-coverage-report |
+| "Run a threat pulse scan" | threat-pulse |
+| "Audit our app registration security posture" | app-registration-posture |
 
 ### Follow-ups and Chaining
 
@@ -209,30 +197,13 @@ What data sources does the ioc-investigation skill use?
 
 **📖 Reference:** [GitHub Agent Skills Documentation](https://docs.github.com/en/copilot/concepts/agents/about-agent-skills)
 
-### Authoring New Skills from Investigations
+### Authoring New Skills & Queries from Investigations
 
-One of the most powerful aspects of this project is that **ad-hoc threat hunting and investigations naturally evolve into reusable skills**. After completing an investigation — chasing a novel attack pattern, triaging an unfamiliar alert type, or building a new KQL query chain — you can ask Copilot to codify that workflow into a new SKILL.md file. This captures the verified queries, schema pitfalls, enrichment steps, and analytical logic so that any SOC analyst on the team can repeat the same high-quality investigation with a single natural-language prompt.
-
-This extends beyond your own investigations. When new threat research drops — a blog post detailing an [AiTM phishing campaign](https://www.microsoft.com/en-us/security/blog/2022/07/12/from-cookie-theft-to-bec-attackers-use-aitm-phishing-sites-as-entry-point-to-further-financial-fraud/), a write-up on a novel [scope drift detection technique](https://techcommunity.microsoft.com/blog/microsoftsentinelblog/the-agentic-soc-era-how-sentinel-mcp-enables-autonomous-security-reasoning/4491003), or an emerging ransomware TTP — you can feed the article URL to Copilot and ask it to extract the attacker behaviors, map them to relevant Sentinel tables, build the detection queries, validate them against your environment, and then package the entire workflow as a new skill. What used to be a manual process of reading a threat intel report, translating IOCs and TTPs into KQL, and documenting runbooks becomes a single conversational workflow.
-
-It brings a DevOps mindset to Security Engineering: every investigation and every piece of external threat research becomes an opportunity to improve the shared knowledge base, drive collaboration across the team, and raise the overall quality bar — turning tribal knowledge into version-controlled, peer-reviewable, continuously improving automation.
-
-**Sample prompts for creating a new skill:**
+Ad-hoc investigations naturally evolve into reusable assets. After completing an investigation, ask Copilot to package the verified queries, schema pitfalls, and analytical logic into a new SKILL.md or query file.
 
 ```
-Based on the investigation we just completed, create a new reusable skill.
-Review the queries we ran, the enrichment steps, and the analytical logic,
-then package it all into a SKILL.md file following the existing skill format
-in .github/skills/. Include the verified KQL queries, known schema pitfalls,
-and a step-by-step workflow that another analyst could follow.
-```
-
-```
-Read this threat intelligence article: <URL>
-Extract the attacker TTPs — initial access, persistence mechanisms, lateral
-movement, and exfiltration techniques. Map each TTP to the relevant Sentinel
-and Defender tables, write detection queries, and create a new investigation
-skill that hunts for these behaviors across our environment.
+"Based on the investigation we just completed, create a new reusable skill"
+"Read this threat intel article: <URL> — extract TTPs and IOCs, then write, test, and tune a queries file for reusable threat hunts"
 ```
 
 ---
@@ -241,22 +212,23 @@ skill that hunts for these behaviors across our environment.
 
 ```
 security-investigator/
-├── generate_report_from_json.py # Report generator (main entry point)
-├── report_generator.py          # HTML report builder class
-├── investigator.py              # Data models and core types
 ├── enrich_ips.py                # Standalone IP enrichment utility
-├── cleanup_old_investigations.py # Automated cleanup (3+ days old)
 ├── config.json                  # Configuration (workspace IDs, mappings)
 ├── config.json.template         # Config template (committed to Git)
 ├── .env                         # API tokens (gitignored, auto-loaded by python-dotenv)
 ├── .env.template                # Token template (committed to Git)
+├── requirements.txt             # Python dependencies
+├── requirements.lock            # Hash-verified dependency lockfile
 ├── .vscode/
 │   └── mcp.json.template       # MCP server config template (copy to mcp.json)
-├── requirements.txt             # Python dependencies
 ├── .github/
 │   ├── copilot-instructions.md  # Skill detection, universal patterns, routing
-│   └── skills/                  # 22 Agent Skills (modular investigation workflows)
+│   ├── manifests/               # Auto-generated discovery indexes
+│   │   ├── discovery-manifest.yaml  # Query file + skill index (domains, MITRE, prompts)
+│   │   └── build_manifest.py        # Manifest generator script
+│   └── skills/                  # 25 Agent Skills (modular investigation workflows)
 │       ├── ai-agent-posture/
+│       ├── app-registration-posture/
 │       ├── authentication-tracing/
 │       ├── ca-policy-investigation/
 │       ├── computer-investigation/
@@ -272,26 +244,37 @@ security-investigator/
 │       ├── ioc-investigation/
 │       ├── kql-query-authoring/
 │       ├── mcp-usage-monitoring/
+│       ├── mitre-coverage-report/
 │       ├── scope-drift-detection/
 │       │   ├── spn/              # Service principal drift (5 dimensions)
 │       │   ├── user/             # User account drift (7+6 dimensions)
 │       │   └── device/           # Device process drift (5 dimensions)
 │       ├── sentinel-ingestion-report/
 │       ├── svg-dashboard/
+│       ├── threat-pulse/
 │       └── user-investigation/
 ├── queries/                     # Verified KQL query library (grep-searchable, by data domain)
-│   ├── identity/               # Entra ID / Azure AD identity queries
-│   ├── endpoint/               # Defender for Endpoint device queries
+│   ├── cloud/                  # Cloud app & exposure management queries
 │   ├── email/                  # Defender for Office 365 email queries
-│   ├── network/                # Network telemetry queries
-│   └── cloud/                  # Cloud app & exposure management queries
+│   ├── endpoint/               # Defender for Endpoint device queries
+│   ├── identity/               # Entra ID / Azure AD identity queries
+│   ├── incidents/              # SecurityIncident & SecurityAlert queries
+│   └── network/                # Network telemetry queries
+├── scripts/                     # Python utilities
+│   ├── generate_report_from_json.py  # Report generator (main entry point)
+│   ├── report_generator.py           # HTML report builder class
+│   ├── investigator.py               # Data models and core types
+│   ├── cleanup_old_investigations.py  # Automated cleanup (3+ days old)
+│   └── generate_tocs.py              # Auto-generate query file TOCs
 ├── mcp-apps/                    # Local MCP servers (visualization, automation)
 │   ├── sentinel-geomap-server/
 │   ├── sentinel-heatmap-server/
 │   └── sentinel-incident-comment/
 ├── docs/                        # Setup guides and reference documentation
+├── authoring/                   # Blog drafts, writing guides, and marketing content
 ├── reports/                     # Generated investigation reports (organized by type)
 │   ├── ai-agent-posture/       # AI agent security posture reports
+│   ├── app-registration-posture/ # App registration posture reports
 │   ├── computer-investigations/ # Device security investigation reports
 │   ├── data-security/          # Data security SIT analysis reports
 │   ├── email-threat-posture/   # Email threat protection posture reports
@@ -301,6 +284,7 @@ security-investigator/
 │   ├── mcp-usage/              # MCP usage monitoring reports
 │   ├── scope-drift/            # Scope drift analysis reports
 │   ├── sentinel/               # Sentinel ingestion & cost analysis reports
+│   ├── threat-pulse/           # Threat Pulse scan reports
 │   └── user-investigations/    # HTML user investigation reports
 ├── temp/                        # Investigation JSON files (auto-cleaned after 3 days)
 └── archive/                     # Legacy code and design docs
@@ -316,6 +300,25 @@ Each file uses a standardized metadata header for efficient `grep_search` discov
 **Tables:** <exact KQL table names>
 **Keywords:** <searchable terms — attack techniques, scenarios, field names>
 **MITRE:** <ATT&CK technique IDs, e.g., T1021.001, TA0008>
+**Domains:** <domain tags for manifest indexing, e.g., identity, endpoint, email>
+```
+
+### Discovery Manifest (`.github/manifests/`)
+
+The **discovery manifest** provides a machine-readable index of all query files and skills, enabling deterministic cross-referencing by domain and MITRE technique. The Threat Pulse skill loads this manifest to match findings to downstream query files and drill-down skills automatically.
+
+- **`discovery-manifest.yaml`** — Compact index (~500 lines) with `title`, `path`, `domains`, `mitre`, and `prompt` fields for each query file and skill
+- **`build_manifest.py`** — Generator script that scans `queries/` metadata headers and skill YAML frontmatter to produce the manifest
+
+**How it works:**
+1. Query files declare `**Domains:**` tags in their metadata header (valid tags: `incidents`, `identity`, `spn`, `endpoint`, `email`, `admin`, `cloud`, `exposure`)
+2. Skills declare `threat_pulse_domains:` and `drill_down_prompt:` in their YAML frontmatter
+3. `python .github/manifests/build_manifest.py` scans both and emits the manifest
+4. The Threat Pulse skill reads the manifest to match non-✅ findings → relevant query files and skills by domain tag and MITRE technique overlap
+
+**Regenerate after** creating or renaming query files/skills, or changing `Domains:`/`threat_pulse_domains:` values:
+```powershell
+python .github/manifests/build_manifest.py
 ```
 
 ---
@@ -326,7 +329,7 @@ Each file uses a standardized metadata header for efficient `grep_search` discov
 
 | Requirement | Details |
 |-------------|---------|
-| **VS Code** | Version 1.99+ recommended (Agent mode + MCP support). [VS Code Insiders](https://code.visualstudio.com/insiders/) required for MCP Apps (visualization). |
+| **VS Code** | Version 1.99+ recommended (Agent mode + MCP support). |
 | **GitHub Copilot** | Active subscription — [Copilot Pro+](https://github.com/features/copilot), Business, or Enterprise. Agent mode must be enabled. |
 | **Python 3.8+** | For IP enrichment utility and report generation. [Download](https://www.python.org/downloads/) |
 | **Azure CLI** | Required for Azure MCP Server (underlying auth) and `sentinel-ingestion-report` skill (`az monitor log-analytics query` for all KQL queries, `az rest` for analytic rule inventory, `az monitor log-analytics workspace table list` for tier classification). [Install](https://aka.ms/installazurecli). Authenticate: `az login --tenant <tenant_id>`, then `az account set --subscription <subscription_id>`. Requires **Log Analytics Reader** (KQL queries + table list) and **Microsoft Sentinel Reader** (analytic rule inventory) on the workspace. |
@@ -427,8 +430,6 @@ The template includes inline documentation for each server. On first use, VS Cod
 See [MCP Server Setup](#-mcp-server-setup) below for per-server permissions and installation guides.
 
 ### 4. Build MCP Apps (Optional — Visualization Skills)
-
-> ⚠️ **VS Code Insiders Required:** MCP Apps currently require [VS Code Insiders](https://code.visualstudio.com/insiders/). Requires **Node.js 18+**.
 
 **PowerShell (Windows):**
 ```powershell
@@ -637,6 +638,31 @@ In **terminal**:
 ```powershell
 python enrich_ips.py 8.8.8.8    # Verifies IP enrichment API tokens
 ```
+
+---
+
+## 🧠 (Optional) Persistent Tenant Context
+
+GitHub Copilot Chat in VS Code provides agents with a **`memory` tool** — a built-in filesystem (`/memories/`) for persisting notes across conversations. Copilot already uses this internally; you can extend it with tenant-specific context (known infrastructure IPs, validated personnel, false-positive patterns, lab automation signatures) so investigations don't repeatedly mis-classify documented activity as 🔴 critical.
+
+Two memory tiers are relevant:
+
+| Tier | Path | Auto-loaded? | Use for |
+|---|---|---|---|
+| **User memory** | `/memories/*.md` | ✅ Yes (~200 lines) | Short trigger rules ("when you see tenant X, read repo file Y") |
+| **Repo memory** | `/memories/repo/*.md` | ❌ Filenames only | Rich tenant context (IPs, personnel, FP patterns) — pulled in by trigger rules |
+
+> The memory tool is an internal agent capability — VS Code does not publish a dedicated docs page for it. Closest related concepts are [custom instructions](https://code.visualstudio.com/docs/copilot/customization/custom-instructions) and [Agent Skills](https://code.visualstudio.com/docs/copilot/customization/agent-skills), which serve different purposes (always-applied conventions and specialized workflows, respectively).
+
+**This workspace ships with:**
+
+- **Templates** in [`notes/memory/examples/`](notes/memory/examples/) — copy and adapt for your tenant (one user-tier example, two repo-tier examples)
+- **Sync script** [`scripts/sync-repo-memory.ps1`](scripts/sync-repo-memory.ps1) — backs up workspace-scoped (`repo`) memory from VS Code AppData into the workspace folder, surviving VS Code reinstall and workspace rename. Any cloud sync attached to your workspace (OneDrive, Dropbox, iCloud, etc.) then mirrors the backup across machines. Defaults to one-way export (`ToBackup`); restore mode (`FromBackup`) requires `-Force` because it writes into Copilot's trusted memory store.
+- **Setup guide** [`notes/memory/README.md`](notes/memory/README.md) — full walkthrough, sync usage, security model, and the trigger-rule pattern that makes Copilot actually consult repo memory
+
+**Quickstart:** Open a template from `notes/memory/examples/`, then ask Copilot in chat to *"create this as a memory file at `/memories/...`, replacing placeholders with my tenant values."* Copilot uses its `memory` tool to write it directly — no AppData path navigation needed.
+
+> ⚠️ **Memory = trusted input.** Anything in `notes/memory/repo/` becomes authoritative instructions for Copilot in every future chat (with MCP tool access to Sentinel, Graph, Azure). Review diffs from forks/PRs before restoring, never paste secrets, and if your workspace is cloud-synced, confirm the destination is acceptable for security context. See [`notes/memory/README.md`](notes/memory/README.md#%EF%B8%8F-security-memory-is-trusted-input) for the full threat model.
 
 ---
 

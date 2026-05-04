@@ -1,6 +1,8 @@
 ---
 name: scope-drift-detection-spn
 description: 'Use this skill when asked to detect scope drift, behavioral expansion, or gradual privilege/access creep in service principals or automation accounts. Triggers on keywords like "scope drift", "service principal drift", "SPN behavioral change", "automation account drift", "baseline deviation", "access expansion", or when investigating whether a service principal has gradually expanded beyond its intended purpose. This skill builds a 90-day behavioral baseline per SPN, compares it with 7-day recent activity, computes a weighted Drift Score across 5 dimensions, and correlates with SecurityAlert and AuditLogs for corroborating evidence.'
+threat_pulse_domains: [spn]
+drill_down_prompt: 'Analyze service principal drift for {entity} — resource/IP/location expansion'
 ---
 
 # Service Principal Scope Drift Detection — Instructions
@@ -43,6 +45,14 @@ This skill detects **scope drift** — the gradual, often imperceptible expansio
 8. **[Known Pitfalls](#known-pitfalls)** - Edge cases and false positives
 9. **[Error Handling](#error-handling)** - Troubleshooting guide
 10. **[SVG Dashboard Generation](#svg-dashboard-generation)** - Visual dashboard from report
+
+**Investigation shortcuts:**
+- **SPN drift triage** (TP Q5): **Q1** (baseline vs recent — drift scores + dimension ratios) → **Q4** (alert/incident correlation) → Tier 1 deep dives for flagged SPNs
+- **Compromised SPN forensics** (TP Q5 + incident context): **Q1** (behavioral profile) → **Q3** (detailed AuditLog changes — credential adds, consent grants, timestamps, actors) → **Q4** (incident status/classification check)
+- **Permission escalation investigation** (TP Q10, standalone): **Q2** (AuditLog summary — operation counts baseline vs recent) → **Q3** (detailed per-operation rows with initiator/target/modified properties) → Graph API: app permission audit
+- **IP infrastructure expansion** (TP Q5, high IPDrift): **Q1** (new IPs list from `NewIPs` array) → anti-join baseline IPs to identify novel sources → IP enrichment (`enrich_ips.py` or `ioc-investigation`) for non-Azure IPs
+
+> **⛔ Shortcut Default Rule:** When a matching shortcut exists for the investigation context, **use it** — don't run the full workflow. Only run the full query set when the user explicitly requests "full investigation", "comprehensive", or "deep dive". Shortcuts render only the report sections relevant to their query chain (plus Executive Summary and Recommendations, always).
 
 ---
 

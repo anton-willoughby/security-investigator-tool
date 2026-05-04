@@ -1,6 +1,8 @@
 ---
 name: user-investigation
 description: Use this skill when asked to investigate a user account for security issues, suspicious activity, or compliance review. Triggers on keywords like "investigate user", "security investigation", "user investigation", "check user activity", "analyze sign-ins", or when a UPN/email is mentioned with investigation context. This skill provides comprehensive Entra ID user security analysis including sign-in anomalies, MFA status, device compliance, audit logs, security incidents, Identity Protection risk, and automated reports (HTML, markdown file, or inline chat).
+threat_pulse_domains: [identity]
+drill_down_prompt: 'Investigate user {entity} — sign-in anomalies, MFA, audit trail, Identity Protection risk'
 ---
 
 # User Security Investigation - Instructions
@@ -25,6 +27,16 @@ This skill performs comprehensive security investigations on Entra ID user accou
 10. **[Error Handling](#error-handling)** - Troubleshooting guide
 11. **[SVG Dashboard Generation](#svg-dashboard-generation)** - Visual dashboard from report data
 
+**Investigation shortcuts:**
+- **Risky user quick triage** (TP Q3): **Q6** (security incidents) → **Q2** (anomalies) → **Q12** (UEBA anomalies) → **Q3d** (sign-ins by IP) → Graph: MFA methods
+- **Compromised user forensics** (TP Q3+Q9): **Q3** (sign-in summary) → **Q5** (OfficeActivity) → **Q3d** (IP breakdown) → **Q1** (priority IPs for enrichment)
+- **Password spray target** (TP Q4): **Q3c** (sign-in failures) → **Q3d** (IPs hitting this user) → **Q6** (related incidents)
+- **Post-incident user timeline** (TP Q1, incident follow-up): **Q4** (audit logs) → **Q5** (O365 activity) → **Q10** (DLP events) → **Q6** (all incidents)
+- **IP enrichment for user** (TP Q3+Q4): **Q1** (priority IP extraction) → **Q11** (TI matches) → `enrich_ips.py`
+- **UEBA behavioral context** (TP Q3, portal UEBA anomalies): **Q12** (Anomalies table) → **Q6** (related incidents) → **Q4** (audit trail)
+
+> **⛔ Shortcut Default Rule:** When a matching shortcut exists for the investigation context, **use it** — don't run the full workflow. Only run full Batch 1 + Batch 2 when the user explicitly requests "full investigation", "comprehensive", or "deep dive". Shortcuts render only the report sections relevant to their query chain (plus Executive Summary and Recommendations, always).
+
 ---
 
 ## ⚠️ CRITICAL WORKFLOW RULES - READ FIRST ⚠️
@@ -45,10 +57,11 @@ This skill performs comprehensive security investigations on Entra ID user accou
 
 **This skill requires a Sentinel workspace to execute queries. Follow these rules STRICTLY:**
 
-### When invoked from incident-investigation skill:
+### When invoked from a parent skill (incident-investigation, threat-pulse, etc.):
 - Inherit the workspace selection from the parent investigation context
 - If no workspace was selected in parent context: **STOP and ask user to select**
 - Use the `SELECTED_WORKSPACE_IDS` passed from the parent skill
+- **Skip output mode prompts** — default to inline chat (the parent skill controls the final output format)
 
 ### When invoked standalone (direct user request):
 1. **ALWAYS call `list_sentinel_workspaces` MCP tool FIRST**
@@ -196,7 +209,7 @@ When a user requests a security investigation:
    ```
    ```powershell
    $env:PYTHONPATH = "<WORKSPACE_ROOT>"
-   .venv\Scripts\python.exe generate_report_from_json.py temp/investigation_<upn_prefix>_<timestamp>.json
+   .venv\Scripts\python.exe scripts/generate_report_from_json.py temp/investigation_<upn_prefix>_<timestamp>.json
    ```
 
 5. **IP Enrichment (Modes 2 & 3):**
@@ -248,6 +261,7 @@ When a user requests a security investigation:
 #### Batch 1: Sentinel Queries (Run ALL in parallel)
 - IP selection query (Query 1) - Returns up to 15 prioritized IPs
 - Anomalies query (Query 2)
+- UEBA anomaly summary (Query 12) - Sentinel Anomalies table: scored behavioral detections
 - Sign-in by application (Query 3)
 - Sign-in by location (Query 3b)
 - Sign-in failures (Query 3c)
@@ -316,7 +330,7 @@ When a user requests a security investigation:
    ```powershell
    $env:PYTHONPATH = "<WORKSPACE_ROOT>"
    cd "<WORKSPACE_ROOT>"
-   .\.venv\Scripts\python.exe generate_report_from_json.py temp/investigation_<upn_prefix>_<timestamp>.json
+   .\.venv\Scripts\python.exe scripts/generate_report_from_json.py temp/investigation_<upn_prefix>_<timestamp>.json
    ```
 
 **The HTML report generator handles:**
@@ -485,7 +499,7 @@ Signinlogs_Anomalies_KQL_CL
 | where DetectedDateTime between (datetime(<StartDate>) .. datetime(<EndDate>))
 | where UserPrincipalName =~ '<UPN>'
 | extend Severity = case(
-    BaselineSize < 3 and AnomalyType startswith "NewNonInteractive", "Informational",
+    BaselineSize < 3, "Informational",
     CountryNovelty and CityNovelty and ArtifactHits >= 20, "High",
     ArtifactHits >= 10, "Medium",
     (CountryNovelty or CityNovelty or StateNovelty), "Medium",
@@ -634,6 +648,11 @@ most_recent_signins
 ```
 
 ### 4. Entra ID Audit Log Activity (Aggregated Summary)
+
+**Tool:** `RunAdvancedHuntingQuery` (≤30d) | `mcp_sentinel-data_query_lake` (>30d fallback)
+
+**AH parsing note:** `InitiatedBy` is dynamic in AH — use `tostring(InitiatedBy.user.userPrincipalName)` for direct field access. For `TargetResources`, use `tostring(TargetResources[0].displayName)`. Do NOT double-wrap with `parse_json(tostring(parse_json(tostring(...))))` — that Data Lake pattern can cause errors in AH.
+
 ```kql
 AuditLogs
 | where TimeGenerated between (datetime(<StartDate>) .. datetime(<EndDate>))
@@ -646,6 +665,18 @@ AuditLogs
     by Category, Result
 | order by Count desc
 | take 10
+```
+
+**Ad-hoc drill-down pattern (AH-safe):** When you need detailed audit entries beyond the summary above:
+```kql
+AuditLogs
+| where TimeGenerated between (datetime(<StartDate>) .. datetime(<EndDate>))
+| where Identity =~ '<UPN>' or tostring(InitiatedBy) has '<UPN>'
+| extend Actor = tostring(InitiatedBy.user.userPrincipalName)
+| extend Target = tostring(TargetResources[0].displayName)
+| project TimeGenerated, OperationName, Actor, Target, Result, Category
+| order by TimeGenerated desc
+| take 30
 ```
 
 ### 5. Office 365 (Email / Teams / SharePoint) Activity Distribution
@@ -705,15 +736,16 @@ let end = datetime(<EndDate>);
 CloudAppEvents
 | where TimeGenerated between (start .. end)
 | where ActionType in ("FileCopiedToRemovableMedia", "FileUploadedToCloud", "FileCopiedToNetworkShare")
-| extend DlpAudit = parse_json(RawEventData)["DlpAuditEventMetadata"]
-| extend File = parse_json(RawEventData)["ObjectId"]
-| extend UserId = parse_json(RawEventData)["UserId"]
-| extend DeviceName = parse_json(RawEventData)["DeviceName"]
-| extend ClientIP = parse_json(RawEventData)["ClientIP"]
-| extend RuleName = parse_json(RawEventData)["PolicyMatchInfo"]["RuleName"]
-| extend Operation = parse_json(RawEventData)["Operation"]
-| extend TargetDomain = parse_json(RawEventData)["TargetDomain"]
-| extend TargetFilePath = parse_json(RawEventData)["TargetFilePath"]
+| extend ParsedData = parse_json(RawEventData)
+| extend DlpAudit = ParsedData["DlpAuditEventMetadata"]
+| extend File = ParsedData["ObjectId"]
+| extend UserId = ParsedData["UserId"]
+| extend DeviceName = ParsedData["DeviceName"]
+| extend ClientIP = ParsedData["ClientIP"]
+| extend RuleName = ParsedData["PolicyMatchInfo"]["RuleName"]
+| extend Operation = ParsedData["Operation"]
+| extend TargetDomain = ParsedData["TargetDomain"]
+| extend TargetFilePath = ParsedData["TargetFilePath"]
 | where isnotnull(DlpAudit)
 | where UserId == upn
 | summarize by TimeGenerated, tostring(UserId), tostring(DeviceName), tostring(ClientIP), tostring(RuleName), tostring(File), tostring(Operation), tostring(TargetDomain), tostring(TargetFilePath)
@@ -722,22 +754,23 @@ CloudAppEvents
 ```
 
 ### 11. Threat Intelligence IP Enrichment (Bulk IP Query)
+
+**Performance notes:** Filter `IsActive`/`ValidUntil` before transformations per [KQL best practices](https://learn.microsoft.com/en-us/kusto/query/best-practices). The triple `replace_string` was replaced with direct array indexing `split(...)[0]`.
+
 ```kql
 let target_ips = dynamic(["<IP_1>", "<IP_2>", "<IP_3>"]);
 ThreatIntelIndicators
-| extend IndicatorType = replace_string(replace_string(replace_string(tostring(split(ObservableKey, ":", 0)), "[", ""), "]", ""), "\"", "")
-| where IndicatorType in ("ipv4-addr", "ipv6-addr", "network-traffic")
-| extend NetworkSourceIP = toupper(ObservableValue)
-| where NetworkSourceIP in (target_ips)
 | where IsActive and (ValidUntil > now() or isempty(ValidUntil))
+| where tostring(split(ObservableKey, ":")[0]) in ("ipv4-addr", "ipv6-addr", "network-traffic")
+| where ObservableValue in (target_ips)
 | extend Description = tostring(parse_json(Data).description)
 | where Description !contains_cs "State: inactive;" and Description !contains_cs "State: falsepos;"
 | extend TrafficLightProtocolLevel = tostring(parse_json(AdditionalFields).TLPLevel)
 | extend ActivityGroupNames = extract(@"ActivityGroup:(\S+)", 1, tostring(parse_json(Data).labels))
-| summarize arg_max(TimeGenerated, *) by NetworkSourceIP
+| summarize arg_max(TimeGenerated, *) by ObservableValue
 | project 
     TimeGenerated,
-    IPAddress = NetworkSourceIP,
+    IPAddress = ObservableValue,
     ThreatDescription = Description,
     ActivityGroupNames,
     Confidence,
@@ -746,6 +779,56 @@ ThreatIntelIndicators
     IsActive
 | order by Confidence desc, TimeGenerated desc
 ```
+
+### 12. UEBA Anomaly Summary (Sentinel Anomalies Table)
+
+**Purpose:** Retrieves scored behavioral anomaly detections from Sentinel's built-in UEBA anomaly rules. Aggregates by anomaly type — collapses high-volume rows (e.g., 50 "Anomalous Role Assignment" events) into a single summary row per template. Extracts only the anomalous flags (`IsAnomalous == true`) and flattens MITRE arrays. Score range: 0.0–1.0 (≥0.7 = High, 0.3–0.7 = Medium, <0.3 = Low).
+
+**Data source:** The `Anomalies` table is the KQL source behind the portal's "UEBA anomalies" section. It is distinct from `BehaviorInfo` (MCAS, AH-only) and `BehaviorAnalytics` (raw UEBA events, Data Lake-only). Available in **both** Advanced Hunting and Data Lake.
+
+**Tool:** `RunAdvancedHuntingQuery` (default) or `mcp_sentinel-data_query_lake` (>30d fallback)
+
+**⚠️ TI False Positive:** `DeviceInsights.ThreatIntelIndicatorType` frequently shows `BruteForce` on corporate/Azure egress IPs (TITAN dynamic reputation). Weight the `Score` and `AnomalyFlags` over the TI match — a 0.2-score anomaly with a BruteForce TI hit on a known corporate IP is noise.
+
+```kql
+let targetUPN = '<UPN>';
+let lookback = 30d;
+Anomalies
+| where TimeGenerated > ago(lookback)
+| where UserPrincipalName =~ targetUPN
+| extend TI_Type = tostring(DeviceInsights.ThreatIntelIndicatorType)
+| mv-apply reason = AnomalyReasons on (
+    where tobool(reason.IsAnomalous) == true
+    | project FlagName = tostring(reason.Name))
+| summarize
+    Occurrences = dcount(Id),
+    MaxScore = max(Score),
+    AvgScore = round(avg(Score), 2),
+    Tactics = make_set(parse_json(Tactics)),
+    Techniques = make_set(parse_json(Techniques)),
+    SourceIPs = make_set(SourceIpAddress, 5),
+    AnomalyFlags = make_set(FlagName),
+    TI_Flags = make_set_if(TI_Type, isnotempty(TI_Type)),
+    FirstSeen = min(StartTime),
+    LastSeen = max(EndTime),
+    SampleDescription = take_any(Description)
+    by AnomalyTemplateName
+| mv-apply t = Tactics to typeof(string) on (summarize Tactics = make_set(t))
+| mv-apply t = Techniques to typeof(string) on (summarize Techniques = make_set(t))
+| extend Tactics = set_difference(Tactics, dynamic([""]))
+| extend Techniques = set_difference(Techniques, dynamic([""]))
+| order by MaxScore desc, Occurrences desc
+```
+
+**Output columns:** `AnomalyTemplateName`, `Occurrences` (unique anomaly IDs), `MaxScore`, `AvgScore`, `Tactics`, `Techniques`, `SourceIPs`, `AnomalyFlags` (flat set of anomalous reasons), `TI_Flags`, `FirstSeen`, `LastSeen`, `SampleDescription` (one example description for context).
+
+**Verdict guidance:**
+- 🔴 **Escalate:** MaxScore ≥ 0.7 with multiple occurrences, or anomaly type involves credential access / account manipulation
+- 🟠 **Investigate:** MaxScore ≥ 0.3, or flags include `CountryUncommonlyConnectedFromByUser` combined with `ActionUncommonlyPerformedByUser`
+- 🟡 **Monitor:** Low scores (<0.3) with explainable flags (e.g., first-time admin operations, CTF/lab accounts in target entities)
+- ✅ **Clear:** 0 results — no UEBA anomalies detected
+
+**Zero results note:** Unlike Q2 (custom `Signinlogs_Anomalies_KQL_CL`), Q12 queries the built-in Sentinel UEBA `Anomalies` table. Zero results means no built-in anomaly rules fired — not that UEBA is disabled. If UEBA is not enabled in the workspace, the table may not exist (handle gracefully).
 
 ---
 

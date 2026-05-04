@@ -5,6 +5,7 @@
 **Tables:** SecureScores, SecureScoreControls, SecurityRecommendation  
 **Keywords:** secure score, defender for cloud, leadership report, score improvement, posture, compliance, security controls, remediation, continuous export, score trend  
 **MITRE:** TA0040, TA0005  
+**Domains:** exposure  
 **Timeframe:** Last 90 days (configurable)  
 
 ---
@@ -34,6 +35,24 @@ When configuring continuous export, select **both** export frequencies:
 - **Score refresh frequency**: Streaming updates arrive when a resource's health state changes. Snapshots are weekly. Expect gaps in data — no change = no new record.
 
 ---
+
+## Quick Reference — Query Index
+
+| # | Query | Use Case | Key Table |
+|---|-------|----------|-----------|
+| 1 | [— Overall Secure Score Trend (Leadership Dashboard)](#query-1--overall-secure-score-trend-leadership-dashboard) | Dashboard | `CurrentScore` + multi |
+| 2 | [— Score Change Summary (Period-over-Period)](#query-2--score-change-summary-period-over-period) | Dashboard | `CurrentScore` + multi |
+| 3 | [— Weekly Score Snapshots (Consistent Cadence)](#query-3--weekly-score-snapshots-consistent-cadence) | Posture | `CurrentScore` + multi |
+| 4 | [— Score Improvement Events (What Moved the Needle?)](#query-4--score-improvement-events-what-moved-the-needle) | Posture | `CurrentScore` + multi |
+| 5 | [— Security Control Scorecard (Current State)](#query-5--security-control-scorecard-current-state) | Posture | `CurrentScore` + multi |
+| 6 | [— Control Score Trends Over Time](#query-6--control-score-trends-over-time) | Dashboard | `CurrentScore` + multi |
+| 7 | [— Remediated Recommendations (What We Fixed)](#query-7--remediated-recommendations-what-we-fixed) | Investigation | `SecurityRecommendation` |
+| 8 | [— Remaining Unhealthy Recommendations (Backlog)](#query-8--remaining-unhealthy-recommendations-backlog) | Investigation | `SecurityRecommendation` |
+| 9 | [— Recommendations Remediated by Severity (Impact Summary)](#query-9--recommendations-remediated-by-severity-impact-summary) | Dashboard | `SecurityRecommendation` |
+| 10 | [— Resource Health Improvement Over Time](#query-10--resource-health-improvement-over-time) | Investigation | — |
+| 11 | [— Top Score Impact Opportunities (What to Fix Next)](#query-11--top-score-impact-opportunities-what-to-fix-next) | Posture | `CurrentScore` + `MaxScore` |
+| 12 | [— Monthly Executive Summary Report](#query-12--monthly-executive-summary-report) | Dashboard | `CurrentScore` + multi |
+
 
 ## Query 1 — Overall Secure Score Trend (Leadership Dashboard)
 

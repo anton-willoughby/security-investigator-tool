@@ -1,6 +1,8 @@
 ---
 name: computer-investigation
 description: Use this skill when asked to investigate a computer, device, endpoint, or machine for security issues, suspicious activity, malware, or compliance review. Triggers on keywords like "investigate computer", "investigate device", "investigate endpoint", "check machine", "device security", "endpoint investigation", or when a device name/hostname is mentioned with investigation context. This skill provides comprehensive device security analysis including Defender alerts, sign-in patterns, logged-on users, vulnerabilities, software inventory, compliance status, network activity, and automated investigation tracking for Entra Joined, Hybrid Joined, and Entra Registered devices.
+threat_pulse_domains: [endpoint]
+drill_down_prompt: 'Investigate device {entity} — Defender alerts, process activity, vulnerabilities, compliance'
 ---
 
 # Computer Security Investigation - Instructions
@@ -30,6 +32,15 @@ This skill performs comprehensive security investigations on Windows, macOS, and
 11. **[Error Handling](#error-handling)** - Troubleshooting guide
 12. **[SVG Dashboard Generation](#svg-dashboard-generation)** - Visual dashboard from report data
 
+**Investigation shortcuts:**
+- **Device with behavioral drift** (TP Q6): **Q3** (suspicious processes) → **Q11** (logon events) → **Q7** (incidents) → **Q8** (device info)
+- **Internet-facing critical asset** (TP Q11): **Q8** (device info + internet-facing) → **Q4** (outbound connections) → **Q10** (vulnerabilities) → **Q11** (logon events)
+- **Device in active incident** (TP Q1): **Q2** (security alerts) → **Q3** (process execution) → **Q5** (file events) → **Q6** (registry persistence) → **Q7** (incidents)
+- **Brute-forced endpoint** (TP Q4): **Q11** (logon events) → **Q4** (outbound connections) → **Q12** (TI IP matches)
+- **Vulnerability assessment** (TP Q12): **Q9** (software inventory) → **Q10** (CVEs on device) → **Q8** (exposure score)
+
+> **⛔ Shortcut Default Rule:** When a matching shortcut exists for the investigation context, **use it** — don't run the full workflow. Only run the full query set when the user explicitly requests "full investigation", "comprehensive", or "deep dive". Shortcuts render only the report sections relevant to their query chain (plus Executive Summary and Recommendations, always).
+
 ---
 
 ## ⚠️ CRITICAL WORKFLOW RULES - READ FIRST ⚠️
@@ -51,10 +62,11 @@ This skill performs comprehensive security investigations on Windows, macOS, and
 
 **This skill requires a Sentinel workspace to execute queries. Follow these rules STRICTLY:**
 
-### When invoked from incident-investigation skill:
+### When invoked from a parent skill (incident-investigation, threat-pulse, etc.):
 - Inherit the workspace selection from the parent investigation context
 - If no workspace was selected in parent context: **STOP and ask user to select**
 - Use the `SELECTED_WORKSPACE_IDS` passed from the parent skill
+- **Skip output mode prompts** — default to inline chat (the parent skill controls the final output format)
 
 ### When invoked standalone (direct user request):
 1. **ALWAYS call `list_sentinel_workspaces` MCP tool FIRST**
@@ -248,7 +260,7 @@ Use Advanced Hunting or Defender API to find the MDE device ID:
 DeviceInfo
 | where DeviceName startswith '<DEVICE_NAME>'  // Use startswith to match both hostname and FQDN
 | summarize arg_max(TimeGenerated, *) by DeviceName
-| project DeviceId, DeviceName, OSPlatform, OSVersion, MachineGroup, OnboardingStatus, ExposureLevel, SensorHealthState
+| project DeviceId, DeviceName, OSPlatform, OSVersion, MachineGroup, OnboardingStatus, ExposureLevel, SensorHealthState, DeviceManualTags, DeviceDynamicTags, RegistryDeviceTag
 ```
 **Note:** RiskScore is NOT in DeviceInfo - use `GetDefenderMachine` API to get riskScore and exposureLevel.
 
@@ -364,7 +376,7 @@ Use these exact patterns with the appropriate MCP tool. Replace `<DEVICE_NAME>`,
 - **Tool:** Use the Sentinel Data Lake MCP's `query_lake` tool
 - **Parameter name:** `query`
 - **Time column:** `TimeGenerated`
-- **Use for:** Native Sentinel tables (SigninLogs, SecurityAlert, SecurityIncident, AuditLogs) AND MDE tables ingested into Sentinel (DeviceInfo, DeviceProcessEvents, DeviceNetworkEvents, etc.)
+- **Use for:** Lookbacks **>30 days** on any table (AH Graph API is capped at 30d), or when AH is blocked by the safety filter
 
 **Example invocation:**
 ```
@@ -377,8 +389,8 @@ query_lake(
 #### Defender XDR Advanced Hunting (RunAdvancedHuntingQuery tool)
 - **Tool:** Use the Sentinel Triage MCP's `RunAdvancedHuntingQuery` tool
 - **Parameter name:** `kqlQuery` (NOT `query`!)
-- **Time column:** `Timestamp`
-- **Use for:** TVM tables (DeviceTvmSoftwareInventory, DeviceTvmSoftwareVulnerabilities) that are NOT ingested into Sentinel Data Lake
+- **Time column:** `Timestamp` for XDR-native tables (`Device*`, `Email*`, etc.); `TimeGenerated` for LA/Sentinel tables (`SigninLogs`, `SecurityAlert`, etc.) — even in AH
+- **Use for:** **Default choice for all ≤30d queries** (free for Analytics-tier tables). Required for TVM tables (`DeviceTvmSoftwareInventory`, `DeviceTvmSoftwareVulnerabilities`) which don't exist in Data Lake.
 
 **Example invocation:**
 ```
@@ -389,19 +401,18 @@ RunAdvancedHuntingQuery(
 
 #### Tool Selection Guide
 
-| Table Type | Primary Tool | Time Column | Notes |
-|------------|--------------|-------------|-------|
-| SigninLogs, AuditLogs | Sentinel Data Lake | TimeGenerated | Native Sentinel tables |
-| SecurityAlert, SecurityIncident | Sentinel Data Lake | TimeGenerated | Native Sentinel tables |
-| DeviceInfo, DeviceProcessEvents | Sentinel Data Lake | TimeGenerated | MDE tables in Sentinel |
-| DeviceNetworkEvents, DeviceFileEvents | Sentinel Data Lake | TimeGenerated | MDE tables in Sentinel |
-| DeviceLogonEvents, DeviceRegistryEvents | Sentinel Data Lake | TimeGenerated | MDE tables in Sentinel |
-| **DeviceTvmSoftwareInventory** | **Advanced Hunting** | Timestamp | Snapshot table, NOT in Sentinel |
-| **DeviceTvmSoftwareVulnerabilities** | **Advanced Hunting** | Timestamp | Snapshot table, NOT in Sentinel |
+**Follow the global Tool Selection Rule in `.github/copilot-instructions.md` (Data Lake vs Advanced Hunting).** This skill does NOT override the global default — use **Advanced Hunting first** for ≤30d lookbacks (free for Analytics-tier tables), and fall back to Data Lake only for >30d windows or when AH is blocked by the safety filter.
 
-**Schema Differences:**
-- Some MDE columns (e.g., `SentBytes`, `ReceivedBytes` in DeviceNetworkEvents) may not be available in Sentinel Data Lake
-- Always test queries against the target tool's schema
+| Table | Tool (lookback ≤30d) | Tool (lookback >30d) | Time Column |
+|-------|----------------------|----------------------|-------------|
+| `Device*` (DeviceInfo, DeviceProcessEvents, DeviceNetworkEvents, DeviceFileEvents, DeviceLogonEvents, DeviceRegistryEvents) | **Advanced Hunting** (free) | Data Lake | AH: `Timestamp` / DL: `TimeGenerated` |
+| `SecurityAlert`, `SecurityIncident` | **Advanced Hunting** | Data Lake | `TimeGenerated` (both tools) |
+| `SigninLogs`, `AuditLogs`, `AADNonInteractiveUserSignInLogs` | **Advanced Hunting** | Data Lake | `TimeGenerated` (both tools) |
+| **`DeviceTvmSoftwareInventory`, `DeviceTvmSoftwareVulnerabilities`** | **Advanced Hunting only** | **Advanced Hunting only** | `Timestamp` (snapshot, no time filter needed) |
+
+**When adapting the sample queries below:** they are written with `TimeGenerated` for Data Lake compatibility. For Advanced Hunting on `Device*` tables, swap `TimeGenerated` → `Timestamp`. For `SecurityAlert`/`SecurityIncident`/`SigninLogs` in AH, keep `TimeGenerated` (LA/Sentinel tables retain their column name in AH).
+
+**Schema differences:** Some MDE columns (e.g., `SentBytes`, `ReceivedBytes` in `DeviceNetworkEvents`) may not be available in Data Lake. If a column fails in one tool, try the other.
 
 ---
 
@@ -661,7 +672,10 @@ DeviceInfo
     IsAzureADJoined,
     IsInternetFacing,
     JoinType,
-    PublicIP
+    PublicIP,
+    DeviceManualTags,
+    DeviceDynamicTags,
+    RegistryDeviceTag
 ```
 
 ### 9. Software Inventory on Device
@@ -728,6 +742,9 @@ DeviceLogonEvents
 ```
 
 ### 12. Threat Intelligence IP Matches (Device Network Traffic)
+
+**Performance notes:** ThreatIntelIndicators can be large (100K+ rows). Filter `IsActive`/`ValidUntil` **before** string transformations per [KQL best practices](https://learn.microsoft.com/en-us/kusto/query/best-practices) — reduce data first, transform later. The triple `replace_string` was replaced with direct array indexing `split(...)[0]` which returns a clean string.
+
 ```kql
 let start = datetime(<StartDate>);
 let end = datetime(<EndDate>);
@@ -738,17 +755,15 @@ let device_ips = DeviceNetworkEvents
 | where RemoteIPType != "Private"
 | distinct RemoteIP;
 ThreatIntelIndicators
-| extend IndicatorType = replace_string(replace_string(replace_string(tostring(split(ObservableKey, ":", 0)), "[", ""), "]", ""), "\"", "")
-| where IndicatorType in ("ipv4-addr", "ipv6-addr", "network-traffic")
-| extend NetworkSourceIP = toupper(ObservableValue)
-| where NetworkSourceIP in (device_ips)
 | where IsActive and (ValidUntil > now() or isempty(ValidUntil))
+| where tostring(split(ObservableKey, ":")[0]) in ("ipv4-addr", "ipv6-addr", "network-traffic")
+| where ObservableValue in (device_ips)
 | extend Description = tostring(parse_json(Data).description)
 | where Description !contains_cs "State: inactive;" and Description !contains_cs "State: falsepos;"
-| summarize arg_max(TimeGenerated, *) by NetworkSourceIP
+| summarize arg_max(TimeGenerated, *) by ObservableValue
 | project 
     TimeGenerated,
-    IPAddress = NetworkSourceIP,
+    IPAddress = ObservableValue,
     ThreatDescription = Description,
     Confidence,
     ValidUntil,
@@ -800,7 +815,7 @@ mcp_microsoft_mcp_microsoft_graph_get("/v1.0/deviceManagement/managedDevices?$fi
 ```
 GetDefenderMachine(id="<DEFENDER_DEVICE_ID>")
 ```
-Returns: id, computerDnsName, osPlatform, osVersion, healthStatus, onboardingStatus, riskScore, exposureLevel, lastSeen, lastIpAddress, lastExternalIpAddress, rbacGroupName
+Returns: id, computerDnsName, osPlatform, osVersion, healthStatus, onboardingStatus, riskScore, exposureLevel, lastSeen, lastIpAddress, lastExternalIpAddress, rbacGroupName, machineTags (API field — maps to DeviceManualTags in AH)
 
 ### Get Logged-On Users
 ```
@@ -886,6 +901,7 @@ When outputting to markdown file (Mode 2), use this template. Populate ALL secti
 | **Last Internal IP** | <ip_address> |
 | **Last External IP** | <ip_address> |
 | **Machine Group** | <group_name> |
+| **Device Tags** | <comma-separated list from DeviceManualTags + DeviceDynamicTags, or "None"> |
 
 ### Device Owners & Registered Users
 

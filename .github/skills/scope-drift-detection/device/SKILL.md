@@ -1,6 +1,8 @@
 ---
 name: scope-drift-detection-device
 description: 'Use this skill when asked to detect scope drift, behavioral expansion, or process baseline deviation on devices or endpoints. Triggers on keywords like "device drift", "device process drift", "endpoint drift", "process baseline", "device behavioral change", or when investigating whether a device has gradually expanded its process execution beyond an established baseline. This skill builds a configurable-window behavioral baseline using DeviceProcessEvents, compares baseline with recent activity, computes a weighted Drift Score across 5 dimensions (Volume, Processes, Accounts, Process Chains, Signing Companies), and correlates with SecurityAlert, DeviceInfo (for uptime corroboration via MDE sensor health), and command-line pattern analysis. Supports fleet-wide and single-device modes.'
+threat_pulse_domains: [endpoint]
+drill_down_prompt: 'Analyze device process drift for {entity} — behavioral baseline vs recent activity'
 ---
 
 # Device Scope Drift Detection — Instructions
@@ -48,6 +50,14 @@ This skill detects **scope drift** — the gradual, often imperceptible expansio
 8. **[Known Pitfalls](#known-pitfalls)** - Edge cases and false positives
 9. **[Error Handling](#error-handling)** - Troubleshooting guide
 10. **[SVG Dashboard Generation](#svg-dashboard-generation)** - Visual dashboard from report
+
+**Investigation shortcuts:**
+- **Device with behavioral drift** (TP Q6): **Q15** (per-device drift scores + dimension ratios) → **Q16** (first-seen processes — new in recent window) → **Q18** (alert/incident correlation) → **Q21** (uptime context)
+- **Suspicious process chains** (TP Q7): **Q17** (rare parent→child chains in recent window) → **Q20** (command-line pattern detection — recon, lateral movement, persistence) → **Q18** (alert correlation)
+- **Fleet uniformity assessment** (TP Q6, all devices clustered): **Q14** (fleet-wide daily trend) → **Q15** (per-device breakdown) → **Q22** (per-session volume — confirms burst vs sustained activity)
+- **Unsigned binary investigation** (standalone): **Q19** (unsigned/unusual signing companies in recent window) → **Q16** (first-seen process overlap) → **Q20** (command-line patterns for flagged binaries)
+
+> **⛔ Shortcut Default Rule:** When a matching shortcut exists for the investigation context, **use it** — don't run the full workflow. Only run the full query set when the user explicitly requests "full investigation", "comprehensive", or "deep dive". Shortcuts render only the report sections relevant to their query chain (plus Executive Summary and Recommendations, always).
 
 ---
 
@@ -157,7 +167,7 @@ Device process drift supports **configurable time windows** unlike sign-in drift
 | "process drift last 30 days" | Days 8–30 | Days 1–7 |
 | No time specified | Last 6 days | Last 24 hours |
 
-**Note:** `DeviceProcessEvents` in Sentinel Data Lake has 90-day retention, but in Advanced Hunting only 30 days. For lookbacks > 30 days, use Sentinel Data Lake (`query_lake` with `TimeGenerated`).
+**Note:** Follow the global **Tool Selection Rule** in `.github/copilot-instructions.md`. For lookbacks **≤ 30 days**, use `RunAdvancedHuntingQuery` (free on Analytics-tier `DeviceProcessEvents`; swap `TimeGenerated` → `Timestamp`). For lookbacks **> 30 days** (AH Graph API cap), use `mcp_sentinel-data_query_lake` with `TimeGenerated`. Sample queries below are written with `TimeGenerated`; adapt the column name when running in Advanced Hunting.
 
 ---
 
@@ -860,8 +870,8 @@ Render a single markdown table summarizing all queries executed. **Do NOT includ
 **Solution:** In the fleet daily trend (Query 14), verify that the most recent day has comparable event counts to previous days. If the last day shows significantly fewer events across ALL devices, note: "⚠️ Data Lake ingestion boundary detected — recent window may be incomplete." Adjust the recent window start time if needed.
 
 ### Advanced Hunting Fallback
-**Problem:** `DeviceProcessEvents` may fail in Advanced Hunting (`RunAdvancedHuntingQuery`) due to query complexity, timeout, or API limitations. This table is available in both Advanced Hunting and Sentinel Data Lake.
-**Solution:** Default to **Sentinel Data Lake** (`query_lake` with `TimeGenerated`) for device process drift queries. Advanced Hunting uses `Timestamp` instead of `TimeGenerated` and has a 30-day retention limit. If Data Lake also fails, check if the table is connected via the Defender XDR connector.
+**Problem:** `DeviceProcessEvents` may fail in one of the two execution tools due to query complexity, timeout, or API limitations. This table is available in both Advanced Hunting and Sentinel Data Lake.
+**Solution:** Follow the global **Tool Selection Rule** in `.github/copilot-instructions.md`: use **Advanced Hunting** (`RunAdvancedHuntingQuery` with `Timestamp`) for lookbacks ≤ 30 days, and **Sentinel Data Lake** (`query_lake` with `TimeGenerated`) for lookbacks > 30 days (e.g., 90-day baselines). If the preferred tool fails, try the other — same table, same data. If both fail, check that the Defender XDR connector is connected to the workspace.
 
 ### System/Service Accounts Dominating Volume
 **Problem:** The majority of process events on servers come from system accounts (`SYSTEM`, `LOCAL SERVICE`, `NETWORK SERVICE`, `root`). These accounts are expected and will dominate volume, process, and chain dimensions.

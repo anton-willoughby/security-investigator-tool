@@ -17,13 +17,16 @@ This skill deploys **custom detection rules** to Microsoft Defender XDR via the 
 
 **Entity Type:** Custom detection rules (Defender XDR)
 
+> **Writing new detection queries from scratch?** This skill focuses on deploying and managing detection rules — not query creation. If you need to write detection KQL from scratch (schema validation, community examples, performance optimization), use the **kql-query-authoring** skill first with CD intent markers (say "create custom detection queries for [scenario]"). It will produce Sentinel-format queries with `cd-metadata` blocks ready for this skill to adapt and deploy.
+
 ---
 
 ## 📑 TABLE OF CONTENTS
 
 1. **[Prerequisites](#prerequisites)** — Auth, scopes, PowerShell modules
 2. **[Critical Rules](#-critical-rules---read-first-)** — Mandatory constraints (includes query adaptation checklist)
-3. **[API Reference](#api-reference)** — Graph API schema and field values
+3. **[Naming Convention](#naming-convention)** — Standardized `displayName` format (no prefixes, no MITRE IDs, colon separators)
+4. **[API Reference](#api-reference)** — Graph API schema and field values
 4. **[Frequency & Lookback](#frequency--lookback)** — Schedule periods, lookback windows, NRT constraints
 5. **[Deployment Workflow](#deployment-workflow)** — Step-by-step process
 6. **[Batch Deployment](#batch-deployment)** — Manifest-driven multi-rule deployment
@@ -76,12 +79,14 @@ Custom detection queries have strict requirements that differ from Sentinel anal
 
 | Requirement | Detail |
 |-------------|--------|
+| **🔴 Author-only by default** | The default behavior is to **author, validate, and write the manifest only** — do NOT call the Graph API to deploy rules unless the user explicitly says "deploy", "create the rule", "push to Defender", or similar deployment-intent language. If deployment intent is ambiguous, ask before calling the API. |
 | **Timestamp column must be projected as-is** | The query MUST project the timestamp column **exactly as it appears in the source table** — `TimeGenerated` for Sentinel/LA tables, `Timestamp` for XDR-native tables. Do not alias one to the other (e.g., `Timestamp = TimeGenerated` causes `400 Bad Request`). See [Pitfall 1](#pitfall-1-timestamp-vs-timegenerated). |
 | **Event-unique columns (per table type)** | Required columns that uniquely identify the event differ by table family. A bare `summarize count()` or `make_set()` loses these columns and fails. `summarize` with `arg_max` IS allowed — see [Pitfall 3](#pitfall-3-summarize--allowed-only-with-row-level-output). See table below for per-type requirements. |
 | **Impacted asset identifier column** | The query must project at least one column whose name matches a valid `impactedAssets` identifier (e.g., `AccountUpn`, `DeviceName`, `DeviceId`). See [Impacted Asset Types](#impacted-asset-types) and [Pitfall 9](#pitfall-9-impactedassets-identifier-must-be-a-predefined-api-value). Queries without `project` or `summarize` typically return these columns automatically. |
 | **`impactedAssets` must be non-empty** | The `impactedAssets` array must contain **at least 1 element**. An empty array (`[]`) is rejected with `400 BadRequest`: *"The field ImpactedAssets must be a string or array type with a minimum length of '1'."* Every detection must declare which entity it impacts. See [Pitfall 13](#pitfall-13-impactedassets-must-be-non-empty). |
 | **No `let` statements (NRT)** | **NRT rules (`schedule: "0"`) reject `let` entirely** — the API returns a generic `400 Bad Request`. This is **not documented by Microsoft** (empirically discovered Feb 2026) but consistently reproducible. Inline all dynamic arrays/lists directly in `where` clauses. Non-NRT rules (1H+) tolerate `let`. |
 | **Unique `displayName` AND `title`** | Both the rule `displayName` and the alert `title` must be unique across all custom detections. Duplicate `displayName` returns `409 Conflict`. Duplicate `title` returns `400 Bad Request`. |
+| **🔴 Naming convention for `displayName`** | Follow the standardized naming convention documented in [Naming Convention](#naming-convention) below. No schedule prefixes, no MITRE IDs, no tactic labels — the portal columns already display these. Use clean, descriptive title-case names with colon (`:`) as the only sub-separator. |
 | **150 alerts per run** | Each rule generates a maximum of 150 alerts per execution. Tune the query to avoid alerting on normal day-to-day activity. |
 | **🔴 No response actions** | All rules deployed by this skill MUST use `"responseActions": []`. Automated response actions (isolate device, disable user, block file, etc.) are **PROHIBITED** — they must only be configured manually by a human operator in the Defender portal after the rule is validated. Never populate `responseActions` in manifests or API calls. |
 | **First run = 30-day backfill** | When a new rule is saved, it immediately runs against the past 30 days of data. Expect a burst of initial alerts if the query has broad coverage. |
@@ -104,7 +109,7 @@ When converting a Sentinel query to custom detection format:
 2. ✅ Project the timestamp column as-is: `TimeGenerated = TimeGenerated` for Sentinel/LA tables, `Timestamp` for XDR tables. Never alias one to the other.
 3. ✅ Project the **impacted asset identifier column** — the column name must match a valid identifier from [Impacted Asset Types](#impacted-asset-types). Examples: `DeviceName = Computer` for device-focused detections, `AccountUpn = UserId` for user-focused. See [Pitfall 9](#pitfall-9-impactedassets-identifier-must-be-a-predefined-api-value).
 4. ✅ Project **event-unique columns** per table type — `DeviceId` + `ReportId` for MDE tables; `ReportId` for other XDR tables; recommended proxy `ReportId` for Sentinel tables (e.g., `ReportId = CorrelationId`). **Caveat:** proxy columns may contain empty strings for some events — acceptable but means those rows won't be individually identifiable in alert details.
-5. ✅ Add a time filter as the first `where` clause — prefer `ingestion_time() > ago(1h)` over `Timestamp > ago(1h)` (see tip below). **NRT exception:** For NRT rules (`schedule: "0"`), omit the time filter entirely — events are processed as they stream in, and the platform pre-filters automatically.
+5. ✅ Add a time filter as the first `where` clause — prefer `ingestion_time() > ago(1h)` over `Timestamp > ago(1h)` (see tip below). **NRT exception:** For NRT rules (`schedule: "0"`), omit **all** time filters — `ingestion_time()` causes `400 Bad Request` in NRT mode (see [Pitfall 17](#pitfall-17-ingestion_time-rejected-in-nrt-rules)). `Timestamp > ago(...)` is accepted but unnecessary.
 6. ✅ Remove `let` variables for NRT rules — **NRT rejects `let` entirely** (generic 400 error, undocumented). Inline all dynamic arrays directly in `where` clauses. Non-NRT rules tolerate `let`.
 7. ✅ Validate via Advanced Hunting dry-run before deployment
 8. ✅ For NRT rules: avoid `tostring()` on dynamic columns — use native string columns instead (e.g., `Properties` instead of `tostring(Properties_d)`). See [Pitfall 11](#pitfall-11-tostring-on-dynamic-columns-rejected-in-nrt-mode).
@@ -155,6 +160,22 @@ SecurityEvent
 - Added `TimeGenerated = TimeGenerated` (identity projection — mandatory)
 - Added `DeviceName = Computer` (impacted asset identifier — device-focused detection)
 - Added `ReportId = CallerProcessId` (proxy ReportId — event-unique identifier)
+
+---
+
+## Naming Convention
+
+The `displayName` should be a clean, title-case description of **what the detection finds**. The portal columns already show Scheduling Type, Tactics, and Techniques — don't repeat them in the name.
+
+| Rule | Example |
+|------|---------|
+| Use colon (`:`) for sub-detail | `Event Log Clearing: Security or System Log Wiped` |
+| Threat actor/family in parentheses at end | `Credential Dumping Tool Execution (Storm-2885)` |
+| TI rules: `Threat Intelligence: {IoC} Match on {Table}` | `Threat Intelligence: IP Match on CloudAppEvents` |
+| **No** schedule prefixes (`NRT —`, `1H —`) | Portal **Scheduling Type** column covers this |
+| **No** MITRE IDs (`T1036 —`) | Portal **Techniques** column covers this |
+| **No** tactic labels (`(Collection)`, `(Exfiltration)`) | Portal **Tactics** column covers this |
+| **No** em dash (`—`) separator | Use colon (`:`) instead |
 
 ---
 
@@ -225,7 +246,7 @@ Valid user identifiers: `accountObjectId`, `accountSid`, `accountUpn`, `accountN
 }
 ```
 
-Valid mailbox identifiers: `recipientEmailAddress`, `senderFromAddress`, `senderMailFromAddress`, `senderEmailAddress`, `senderObjectId`
+Valid mailbox identifiers: `accountUpn`, `fileOwnerUpn`, `initiatingProcessAccountUpn`, `lastModifyingAccountUpn`, `targetAccountUpn`, `senderFromAddress`, `senderDisplayName`, `recipientEmailAddress`, `senderMailFromAddress`
 
 ### Minimal Valid POST Body
 
@@ -320,7 +341,7 @@ NRT (Continuous, `period: "0"`) rules have stricter requirements than scheduled 
 | **No `externaldata`** | Cannot use the `externaldata` operator |
 | **No comments** | Query text must not contain any comment lines (`//`) |
 | **Supported operators only** | Limited to [supported KQL features](https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/data-collection-transformations-structure#supported-kql-features). **`tostring()` on dynamic columns is rejected** — use native string columns instead (e.g., `Properties` instead of `tostring(Properties_d)`). See [Pitfall 11](#pitfall-11-tostring-on-dynamic-columns-rejected-in-nrt-mode). |
-| **No time filter needed** | NRT processes events as they stream in. The platform pre-filters automatically. Adding a time filter (e.g., `TimeGenerated > ago(1h)`) is unnecessary but harmless. |
+| **No time filter needed** | NRT processes events as they stream in. The platform pre-filters automatically. `Timestamp > ago(1h)` is unnecessary but harmless. **However, `ingestion_time()` is rejected** — the API returns `400 Bad Request`. See [Pitfall 17](#pitfall-17-ingestion_time-rejected-in-nrt-rules). |
 
 ### NRT-Supported Tables
 
@@ -332,7 +353,7 @@ Not all tables support NRT frequency. Use NRT only with these tables:
 \* `EmailEvents`: `LatestDeliveryLocation` and `LatestDeliveryAction` columns are excluded from NRT.
 
 **Sentinel tables (Preview):**
-`ABAPAuditLog_CL`, `AuditLogs`, `AWSCloudTrail`, `AWSGuardDuty`, `AzureActivity`, `Cisco_Umbrella_dns_CL`, `Cisco_Umbrella_proxy_CL`, `CommonSecurityLog`, `GCPAuditLogs`, `MicrosoftGraphActivityLogs`, `OfficeActivity`, `Okta_CL`, `OktaV2_CL`, `ProofpointPOD`, `ProofPointTAPClicksPermitted_CL`, `ProofPointTAPMessagesDelivered_CL`, `SecurityAlert`, `SecurityEvent`, `SigninLogs`
+`ABAPAuditLog_CL`, `ABAPChangeDocsLog_CL`, `AuditLogs`, `AWSCloudTrail`, `AWSGuardDuty`, `AzureActivity`, `CommonSecurityLog`, `GCPAuditLogs`, `MicrosoftGraphActivityLogs`, `OfficeActivity`, `Okta_CL`, `OktaV2_CL`, `ProofpointPOD`, `ProofPointTAPClicksPermitted_CL`, `ProofPointTAPMessagesDelivered_CL`, `SecurityAlert`, `SecurityEvent`, `SigninLogs`
 
 > **Important:** `SecurityEvent` and `SigninLogs` support NRT — our Event ID 4799/4702 queries can run as NRT if they meet the single-table/no-joins constraint.
 
@@ -350,6 +371,8 @@ For rules based entirely on Sentinel-ingested data, a custom frequency is availa
 ---
 
 ## Deployment Workflow
+
+> **🔴 DEPLOYMENT GATE:** Only proceed to Steps 2-3 (API calls) when the user has **explicitly requested deployment**. Trigger phrases: "deploy", "create the rule", "push", "POST it", "make it live". If the user asked to "author", "write", "create a manifest", "prepare", or "draft" a detection — stop after validation (Step 1) and manifest generation. Present the manifest JSON for review and wait for explicit deployment confirmation.
 
 ### Single Rule Deployment
 
@@ -498,15 +521,59 @@ $rule | ConvertTo-Json -Depth 10
 
 ### Update Rule (PATCH)
 
-```powershell
-$update = @{
-    isEnabled = $false
-    schedule = @{ period = "24H" }
-} | ConvertTo-Json -Depth 10
+`PATCH /beta/security/rules/detectionRules/{id}` — send only the fields you want to change. All fields are optional.
 
+**Updatable fields:**
+
+| Field Path | Type | Notes |
+|-----------|------|-------|
+| `displayName` | String | Rule name — follow [Naming Convention](#naming-convention) |
+| `isEnabled` | Boolean | Enable/disable without deleting |
+| `queryCondition.queryText` | String | KQL query — validates before saving |
+| `schedule.period` | String | `0` (NRT), `1H`, `3H`, `12H`, `24H` |
+| `detectionAction.alertTemplate.title` | String | Alert title (supports `{{Column}}` variables) |
+| `detectionAction.alertTemplate.description` | String | Alert description (supports `{{Column}}` variables) |
+| `detectionAction.alertTemplate.severity` | String | `informational`, `low`, `medium`, `high` |
+| `detectionAction.alertTemplate.category` | String | ATT&CK tactic (e.g., `CredentialAccess`) |
+| `detectionAction.alertTemplate.recommendedActions` | String | `null` to clear |
+| `detectionAction.alertTemplate.impactedAssets` | Array | `null` to clear |
+| `detectionAction.responseActions` | Array | **Always `[]`** — see critical rules |
+
+**Examples:**
+
+```powershell
+# Rename a rule
+$body = @{ displayName = 'Cloud Password Spray: Multi-Account Failed Auth from Single IP' } | ConvertTo-Json
+Invoke-MgGraphRequest -Method PATCH `
+    -Uri "/beta/security/rules/detectionRules/6044" `
+    -Body $body -ContentType "application/json"
+
+# Change schedule and severity
+$body = @{
+    schedule = @{ period = "24H" }
+    detectionAction = @{
+        alertTemplate = @{ severity = "high" }
+    }
+} | ConvertTo-Json -Depth 10
 Invoke-MgGraphRequest -Method PATCH `
     -Uri "/beta/security/rules/detectionRules/5632" `
-    -Body $update -ContentType "application/json"
+    -Body $body -ContentType "application/json"
+
+# Batch rename (loop pattern)
+$renames = @{
+    'Old Rule Name' = 'New Rule Name'
+    'Another Old Name' = 'Another New Name'
+}
+$rules = (Invoke-MgGraphRequest -Method GET `
+    -Uri "/beta/security/rules/detectionRules" -OutputType PSObject).value
+foreach ($old in $renames.Keys) {
+    $rule = $rules | Where-Object { $_.displayName -eq $old }
+    if (-not $rule) { continue }
+    $body = @{ displayName = $renames[$old] } | ConvertTo-Json
+    Invoke-MgGraphRequest -Method PATCH `
+        -Uri "/beta/security/rules/detectionRules/$($rule.id)" `
+        -Body $body -ContentType "application/json"
+}
 ```
 
 ### Delete Rule
@@ -746,8 +813,9 @@ Additionally, the query MUST project a column whose name matches the chosen iden
 | `"identifier": "UserId"` | `"identifier": "accountUpn"` + project `AccountUpn = UserId` |
 | `"identifier": "Actor"` | `"identifier": "accountUpn"` + rename `Actor` → `AccountUpn` |
 | `"identifier": "TargetComputer"` | `"identifier": "deviceName"` + project `DeviceName = Computer` |
-| `"identifier": "TargetUPN"` | `"identifier": "accountUpn"` + rename `TargetUPN` → `AccountUpn` |
+| `"identifier": "TargetUPN"` | `"identifier": "accountUpn"` + rename `TargetUPN` → `AccountUpn` || `"identifier": "initiatingProcessAccountName"` | `"identifier": "accountName"` + project `AccountName = InitiatingProcessAccountName` |
 
+> **⚠️ `InitiatingProcess*` column trap (Apr 2026):** Device\* tables project many `InitiatingProcess*` columns (e.g., `InitiatingProcessAccountName`, `InitiatingProcessAccountSid`, `InitiatingProcessAccountUpn`, `InitiatingProcessAccountObjectId`). Only **three** of these are valid user identifiers: `initiatingProcessAccountUpn`, **and the `initiatingAccount*` variants** (`initiatingAccountSid`, `initiatingAccountName`, `initiatingAccountDomain`). Notably, `initiatingProcessAccountName` is **NOT** valid — it looks correct because the column exists, but the API enum uses `accountName` instead. The API rejects invalid identifiers with a silent `400 InvalidInput` (empty error message), making this very hard to debug. **Always alias the column:** `AccountName = InitiatingProcessAccountName`.
 > **DeviceId requirement:** For XDR-native tables (Device\*, Email\*, CloudAppEvents) with a device-type impactedAsset, the query must project `DeviceId` (not just `DeviceName`). Sentinel/LA tables (SecurityEvent, AuditLogs) do not require `DeviceId`.
 
 ### Pitfall 10: PowerShell Empty Array Swallowing & `organizationalScope`
@@ -865,7 +933,7 @@ The Graph API enforces **3 unique `{{Column}}` references** across `title` and `
 
 **Rule:** For ANY `queryText`, **always use `@'...'@`**. This eliminates both `$` interpolation bugs and escaping confusion. Applies to inline PowerShell, the batch deployment script, and any LLM-generated deployment commands.
 
-**Additional validated finding:** `ingestion_time()` IS accepted by the CD API (tested and confirmed Mar 2026, despite MS Learn documentation ambiguity). The CD query validator accepts all functions that Advanced Hunting accepts for scheduled (non-NRT) rules.
+**Additional validated finding:** `ingestion_time()` IS accepted by the CD API for **scheduled (non-NRT) rules** (tested and confirmed Mar 2026). However, **NRT rules reject `ingestion_time()`** with `400 Bad Request` — empirically confirmed Apr 2026, reproducible on retry. See [Pitfall 17](#pitfall-17-ingestion_time-rejected-in-nrt-rules).
 
 ### Pitfall 16: StrictMode `.Count` on Pipeline Scalars
 
@@ -879,6 +947,28 @@ $x = @(... | Sort-Object -Unique)
 ```
 
 **Fixed in** [Deploy-CustomDetections.ps1](Deploy-CustomDetections.ps1) (Mar 2026): dynamic column validation, manifest load, and existing rule fetch all wrapped in `@()`.
+
+### Pitfall 17: `ingestion_time()` Rejected in NRT Rules
+
+**NRT rules (`schedule: "0"`) reject `ingestion_time()` with `400 Bad Request`.** The NRT Constraints table notes that `Timestamp > ago(...)` is "unnecessary but harmless" — however, `ingestion_time()` is NOT harmless in NRT mode. It is a function call (not a column filter), and the NRT streaming pipeline rejects it outright.
+
+**Empirically confirmed (Apr 2026):** Four-attempt A/B test on the same query (`DeviceProcessEvents` with vssadmin/bcdedit destructive command detection):
+
+| Attempt | `ingestion_time()` present | Result |
+|---------|---------------------------|--------|
+| 1st deploy | Yes | ❌ `400 Bad Request` |
+| 2nd deploy | Removed | ✅ Created |
+| Delete + redeploy | Restored | ❌ `400 Bad Request` |
+| Delete + redeploy | Removed | ✅ Created |
+
+**Root cause hypothesis:** NRT rules process events via streaming ingestion — `ingestion_time()` likely depends on a materialized ingestion timestamp that isn't available (or isn't filterable) in the NRT streaming pipeline.
+
+**Fix:** For NRT rules, omit `ingestion_time()` entirely. If you need a time filter, use `Timestamp > ago(...)` instead (accepted but unnecessary since NRT pre-filters automatically).
+
+| Rule type | `ingestion_time()` | `Timestamp > ago(...)` |
+|-----------|-------------------|------------------------|
+| Scheduled (1H+) | ✅ Accepted (preferred) | ✅ Accepted |
+| NRT (`"0"`) | ❌ **400 Bad Request** | ✅ Accepted (unnecessary) |
 
 ---
 
@@ -952,6 +1042,6 @@ This explicitly documents the assessment so the detection skill doesn't re-evalu
 1. **User says "deploy query 8 as a custom detection"** → Skill reads the query file, finds the cd-metadata block for Query 8
 2. **Pre-populates manifest entry** from cd-metadata fields (schedule, category, severity, title, impactedAssets)
 3. **Applies [Query Adaptation Checklist](#query-adaptation-checklist)** to the Sentinel KQL query in that section
-4. **Deploys** via Graph API or generates manifest JSON for batch deployment
+4. **Writes manifest JSON** to `temp/` for review. Only deploys via Graph API if the user explicitly requested deployment (see [Deployment Gate](#deployment-workflow))
 
 If a query file has **no cd-metadata blocks**, the skill assesses CD-readiness manually based on the query structure and the [Query Adaptation Checklist](#query-adaptation-checklist).

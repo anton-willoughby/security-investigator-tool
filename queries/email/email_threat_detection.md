@@ -5,6 +5,7 @@
 **Tables:** EmailEvents, EmailPostDeliveryEvents, EmailUrlInfo, EmailAttachmentInfo, UrlClickEvents  
 **Keywords:** email, phishing, AiTM, adversary-in-the-middle, BEC, business email compromise, spam, malware, ZAP, inbox rule, attachment, URL click, Safe Links, first contact, DMARC, DKIM, SPF, authentication, forwarding, detection methods  
 **MITRE:** T1566.001, T1566.002, T1598, T1114.003, T1534, T1020, TA0001, TA0009, TA0010  
+**Domains:** email  
 **Timeframe:** Last 30 days (configurable)
 
 ---
@@ -13,19 +14,62 @@
 
 This collection of KQL queries covers email-based threat detection across the Microsoft Defender for Office 365 (MDO) tables available in Sentinel Data Lake. These tables power investigations for phishing campaigns, AiTM attacks, BEC fraud, malware delivery, and email exfiltration.
 
-**Tables Reference:**
-
-| Table | Purpose | Key Join Column |
-|-------|---------|-----------------|
-| `EmailEvents` | Core email metadata — sender, recipient, direction, threats, delivery action | `NetworkMessageId` |
-| `EmailPostDeliveryEvents` | Post-delivery actions — ZAP (zero-hour auto purge), manual remediation | `NetworkMessageId` |
-| `EmailUrlInfo` | URLs embedded in emails | `NetworkMessageId` |
-| `EmailAttachmentInfo` | File attachments in emails | `NetworkMessageId` |
-| `UrlClickEvents` | Safe Links click tracking — who clicked, was it blocked or allowed | `NetworkMessageId`, `Url` |
-
-> **⚠️ Data Lake vs Advanced Hunting:** These tables exist in the Sentinel Data Lake when the Defender XDR connector is enabled. Use `TimeGenerated` (not `Timestamp`) as the datetime column in Data Lake queries. If a table is missing, retry with `RunAdvancedHuntingQuery` using `Timestamp`.
-
 ---
+
+## Quick Reference — Query Index
+
+**Investigation shortcuts:**
+- **Delivered phishing emails and recipients** (TP Q8): **2.4** (delivered phishing list) → **7.6** (URL clicks by recipients) → **3.3** (inbox rules created post-delivery)
+- **Phishing posture and detection gaps** (TP Q8): **1.1** (threat breakdown) + **5.1** (detection methods) + **5.2** (overridden threats)
+- **ZAP failure investigation** (TP Q8): **6.2** (failed ZAP — threats still in mailbox) → **6.3** (user activity after failed ZAP)
+- **AiTM phishing full chain** (TP Q3+Q8): **3.2** (phishing → anomalous token → inbox rule) — cross-ref with aitm_threat_detection.md
+- **Post-compromise email exfiltration** (TP Q9, incident follow-up): **9.1** (outbound from compromised account) + **9.2** (external forwarding) + **9.3** (OfficeActivity forwarding rules)
+
+| # | Query | Use Case | Key Table |
+|---|-------|----------|-----------|
+| 1.1 | [Inbound Email Summary with Threat Breakdown](#11-inbound-email-summary-with-threat-breakdown) | Dashboard | `EmailEvents` |
+| 1.2 | [Email Volume Trend by Day and Direction](#12-email-volume-trend-by-day-and-direction) | Dashboard | `EmailEvents` |
+| 1.3 | [Top Sender Domains by Volume](#13-top-sender-domains-by-volume) | Dashboard | `EmailEvents` |
+| 2.1 | [Phishing Emails — Detailed View](#21-phishing-emails--detailed-view) | Investigation | `EmailEvents` |
+| 2.2 | [Top Phishing Sender Domains](#22-top-phishing-sender-domains) | Triage | `EmailEvents` |
+| 2.3 | [Most Targeted Recipients for Phishing](#23-most-targeted-recipients-for-phishing) | Triage | `EmailEvents` |
+| 2.4 | [Phishing Emails That Were Delivered (Not Blocked)](#24-phishing-emails-that-were-delivered-not-blocked) | Investigation | `EmailEvents` |
+| 2.5 | [First-Contact Phishing Attempts](#25-first-contact-phishing-attempts) | Investigation | `EmailEvents` |
+| 3.1 | [AiTM Proxy Sign-In Detection (OfficeHome App)](#31-aitm-proxy-sign-in-detection-officehome-app) | Detection | `SigninLogs` |
+| 3.2 | [AiTM Full Chain: Phishing Email → Anomalous Token → Inbox Rule](#32-aitm-full-chain-phishing-email--anomalous-token--inbox-rule) | Detection | `AADUserRiskEvents` + `EmailEvents` |
+| 3.3 | [Inbox Rules Created After Phishing Email Delivery](#33-inbox-rules-created-after-phishing-email-delivery) | Detection | `EmailEvents` + `OfficeActivity` |
+| 4.1 | [Email Authentication Failures (DMARC/DKIM/SPF)](#41-email-authentication-failures-dmarcdkimspf) | Investigation | `EmailEvents` |
+| 4.2 | [Authentication Failure Summary by Domain](#42-authentication-failure-summary-by-domain) | Dashboard | `EmailEvents` |
+| 4.3 | [Envelope-From vs Header-From Mismatch (Display Name Spoofing)](#43-envelope-from-vs-header-from-mismatch-display-name-spoofing) | Investigation | `EmailEvents` |
+| 5.1 | [Detection Methods Breakdown](#51-detection-methods-breakdown) | Dashboard | `EmailEvents` |
+| 5.2 | [Overridden Threats (Allow Policies Bypassing Detection)](#52-overridden-threats-allow-policies-bypassing-detection) | Detection | `EmailEvents` |
+| 5.3 | [Third-Party Detection Integration](#53-third-party-detection-integration) | Detection | `EmailEvents` |
+| 6.1 | [ZAP Actions Summary](#61-zap-actions-summary) | Dashboard | `EmailPostDeliveryEvents` |
+| 6.2 | [Failed ZAP Actions (Threats Still in Mailbox)](#62-failed-zap-actions-threats-still-in-mailbox) | Investigation | `EmailEvents` + `EmailPostDeliveryEvents` |
+| 6.3 | [User Activity After Failed ZAP (Compromise Check)](#63-user-activity-after-failed-zap-compromise-check) | Investigation | `EmailPostDeliveryEvents` + `SigninLogs` |
+| 7.1 | [URLs in Inbound Emails — Domain Summary](#71-urls-in-inbound-emails--domain-summary) | Dashboard | `EmailEvents` + `EmailUrlInfo` |
+| 7.2 | [Suspicious URL Patterns (Long URLs, Encoded Params)](#72-suspicious-url-patterns-long-urls-encoded-params) | Investigation | `EmailEvents` + `EmailUrlInfo` |
+| 7.3 | [Safe Links Clicks — All Activity](#73-safe-links-clicks--all-activity) | Investigation | `UrlClickEvents` |
+| 7.4 | [Clicks Allowed on Malicious URLs (User Exposed to Threat)](#74-clicks-allowed-on-malicious-urls-user-exposed-to-threat) | Investigation | `UrlClickEvents` |
+| 7.5 | [URL Click Summary by User](#75-url-click-summary-by-user) | Dashboard | `UrlClickEvents` |
+| 7.6 | [Clicks on URLs from Delivered Phishing Emails (Investigation Query)](#76-clicks-on-urls-from-delivered-phishing-emails-investigation-query) | Investigation | `EmailEvents` + `UrlClickEvents` |
+| 8.1 | [Attachment Summary by File Type](#81-attachment-summary-by-file-type) | Dashboard | `EmailAttachmentInfo` |
+| 8.2 | [Malicious Attachments Detected](#82-malicious-attachments-detected) | Detection | `EmailAttachmentInfo` + `EmailEvents` |
+| 8.3 | [Attachment Hash Lookup Against Threat Intelligence](#83-attachment-hash-lookup-against-threat-intelligence) | Investigation | `EmailAttachmentInfo` |
+| 8.4 | [Attachments on Devices (Lateral Spread Check)](#84-attachments-on-devices-lateral-spread-check) | Investigation | `DeviceFileEvents` + `EmailAttachmentInfo` |
+| 9.1 | [Outbound Emails from Compromised Accounts](#91-outbound-emails-from-compromised-accounts) | Investigation | `EmailEvents` |
+| 9.2 | [External Forwarding Detection via Email Events](#92-external-forwarding-detection-via-email-events) | Detection | `EmailEvents` |
+| 9.3 | [Email Forwarding Rules via OfficeActivity (Comprehensive)](#93-email-forwarding-rules-via-officeactivity-comprehensive) | Detection | `OfficeActivity` |
+| 10.1 | [MDO Detection Efficacy (Pre vs Post-Delivery)](#101-mdo-detection-efficacy-pre-vs-post-delivery) | Dashboard | `EmailEvents` + `EmailPostDeliveryEvents` |
+| 10.2 | [Delivery Action Breakdown](#102-delivery-action-breakdown) | Dashboard | `EmailEvents` |
+| 10.3 | [Latest Delivery Location (Post-ZAP State)](#103-latest-delivery-location-post-zap-state) | Investigation | `EmailEvents` |
+| 11.1 | [Phishing Email → Device Logon Correlation](#111-phishing-email--device-logon-correlation) | Investigation | `DeviceLogonEvents` + `EmailEvents` |
+| 11.2 | [Malicious Email → PowerShell Execution Correlation](#112-malicious-email--powershell-execution-correlation) | Investigation | `DeviceProcessEvents` + `EmailEvents` |
+| 11.3 | [Email with URL → URL Click → Sign-in Timeline](#113-email-with-url--url-click--sign-in-timeline) | Investigation | `EmailEvents` + multi |
+| 12.1 | [All Emails for a Specific User](#121-all-emails-for-a-specific-user) | Investigation | `EmailEvents` |
+| 12.2 | [Trace a Specific Email by NetworkMessageId](#122-trace-a-specific-email-by-networkmessageid) | Investigation | `EmailAttachmentInfo` + multi |
+| 12.3 | [Emails from a Suspicious Sender](#123-emails-from-a-suspicious-sender) | Investigation | `EmailEvents` |
+
 
 ## 1. Mail Flow Overview
 
@@ -608,6 +652,8 @@ UrlClickEvents
 | order by TimeGenerated desc
 ```
 
+**⚠️ Investigation pitfall:** This query only finds clicks where Safe Links **independently** tagged the URL as malicious (`ThreatTypes` populated). Safe Links and EmailEvents use **different detection engines** — an email flagged as phishing by EmailEvents may contain URLs that Safe Links allows without tagging. For drill-down investigations following delivered phishing, use **Q7.6** instead (joins delivered phishing NetworkMessageIds with all clicks).
+
 ### 7.5 URL Click Summary by User
 
 Identify users with the most Safe Links click activity — potential risky click behavior.
@@ -629,6 +675,32 @@ UrlClickEvents
     by AccountUpn
 | order by TotalClicks desc
 ```
+
+### 7.6 Clicks on URLs from Delivered Phishing Emails (Investigation Query)
+
+Joins delivered phishing emails with URL click activity — catches ALL clicks on URLs from known-phishing emails, regardless of whether Safe Links tagged the URL as malicious at click time. **Use this query (not Q7.4) when investigating delivered phishing from EmailEvents.**
+
+<!-- cd-metadata
+cd_ready: false
+adaptation_notes: "Investigation-only join query. Requires delivered phishing emails as input. Not suitable for CD — use Q7.4 for standalone detection. This query answers 'did anyone click URLs in emails we know are phishing?' vs Q7.4 which answers 'did Safe Links flag any clicked URLs as malicious?'"
+-->
+```kql
+let DeliveredPhish = EmailEvents
+| where TimeGenerated > ago(30d)
+| where ThreatTypes has "Phish"
+| where DeliveryAction == "Delivered"
+| project NetworkMessageId, RecipientEmailAddress, SenderFromAddress, Subject;
+UrlClickEvents
+| where TimeGenerated > ago(30d)
+| join kind=inner DeliveredPhish on NetworkMessageId
+| project TimeGenerated, AccountUpn, RecipientEmailAddress,
+    SenderFromAddress, Subject, Url, UrlChain,
+    ActionType, IsClickedThrough, ThreatTypes,
+    IPAddress, Workload, NetworkMessageId
+| order by TimeGenerated desc
+```
+
+**Why this query exists:** Safe Links and EmailEvents use different detection engines. EmailEvents may flag an email as phishing (via heuristics, sender reputation, content analysis) while Safe Links allows the URL through if it doesn't match their real-time URL threat DB at click time. Q7.4 (`isnotempty(ThreatTypes)` on UrlClickEvents) returns 0 results in this scenario — a dangerous false negative during investigations. This query eliminates the gap by starting from known-phishing `NetworkMessageId`s.
 
 ---
 
@@ -786,7 +858,7 @@ Detect inbox rule creation/modification that sets up forwarding or redirection.
 
 <!-- cd-metadata
 cd_ready: false
-adaptation_notes: "Uses OfficeActivity table — Sentinel-only, may not be available in Advanced Hunting. For CD, consider CloudAppEvents with ActionType containing inbox rule operations instead."
+adaptation_notes: "OfficeActivity is queryable via Advanced Hunting when the LA workspace is connected to the unified Defender portal (use TimeGenerated, not Timestamp). For CD, consider CloudAppEvents with ActionType containing inbox rule operations instead."
 -->
 ```kql
 OfficeActivity
@@ -973,7 +1045,7 @@ Full chain: phishing email with URL → user clicked the URL → subsequent sign
 
 <!-- cd-metadata
 cd_ready: false
-adaptation_notes: "3-table join investigation chain (EmailUrlInfo → UrlClickEvents → AADSignInEventsBeta). Complex multi-step correlation with leftouter joins. Better as forensic investigation query, not automated CD."
+adaptation_notes: "3-table join investigation chain (EmailUrlInfo → UrlClickEvents → EntraIdSignInEvents). Complex multi-step correlation with leftouter joins. Better as forensic investigation query, not automated CD."
 -->
 ```kql
 let SuspiciousClicks = UrlClickEvents

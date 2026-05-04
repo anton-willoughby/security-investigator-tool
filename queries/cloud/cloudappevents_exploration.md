@@ -3,8 +3,9 @@
 **Created:** 2026-01-13  
 **Platform:** Microsoft Sentinel  
 **Tables:** CloudAppEvents  
-**Keywords:** cloud app, Office 365, Azure AD, AWS, external user, admin activity, impersonation, anonymous proxy, geographic anomaly, baseline  
+**Keywords:** cloud app, Office 365, Azure AD, AWS, external user, admin activity, impersonation, anonymous proxy, geographic anomaly, baseline, inbox rule, forwarding, transport rule, mailbox permission  
 **MITRE:** T1078, T1199, TA0001, TA0009  
+**Domains:** admin, cloud  
 **Timeframe:** Last 7 days (configurable)
 
 ---
@@ -23,6 +24,22 @@ This query collection helps security analysts understand the types of events, ac
 **Schema Note:** In Sentinel, CloudAppEvents uses `TimeGenerated` for timestamps (not `Timestamp` as in Defender XDR Advanced Hunting).
 
 ---
+
+## Quick Reference — Query Index
+
+| # | Query | Use Case | Key Table |
+|---|-------|----------|-----------|
+| 1 | [Top 20 Action Types by Frequency](#query-1-top-20-action-types-by-frequency) | Triage | `CloudAppEvents` |
+| 2 | [Application Distribution](#query-2-application-distribution) | Investigation | `CloudAppEvents` |
+| 3 | [Activity Types Breakdown](#query-3-activity-types-breakdown) | Dashboard | `CloudAppEvents` |
+| 4 | [Admin Operations Analysis](#query-4-admin-operations-analysis) | Investigation | `CloudAppEvents` |
+| 5 | [External User Activity](#query-5-external-user-activity) | Investigation | `CloudAppEvents` |
+| 6 | [Events by Object Type](#query-6-events-by-object-type) | Investigation | `CloudAppEvents` |
+| 7 | [Geographic Distribution & Anonymous Proxy Detection](#query-7-geographic-distribution--anonymous-proxy-detection) | Detection | `AnonymousProxyEvents` + multi |
+| 8 | [Daily Event Trend](#query-8-daily-event-trend) | Dashboard | `CloudAppEvents` |
+| 9 | [Impersonation Events](#query-9-impersonation-events) | Investigation | `CloudAppEvents` |
+| 10 | [Sample Event Details](#query-10-sample-event-details) | Investigation | `CloudAppEvents` |
+
 
 ## Query 1: Top 20 Action Types by Frequency
 

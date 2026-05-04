@@ -1,6 +1,8 @@
 ---
 name: scope-drift-detection-user
 description: 'Use this skill when asked to detect scope drift, behavioral expansion, or gradual privilege/access creep in user accounts. Triggers on keywords like "user drift", "user behavioral change", "user scope drift", "user baseline deviation", "user access expansion", or when investigating whether a user account has gradually expanded beyond its established behavioral baseline. This skill builds a 90-day behavioral baseline for both interactive and non-interactive sign-ins, compares with 7-day recent activity, computes weighted Drift Scores (7 dimensions for interactive, 6 for non-interactive), and correlates with SecurityAlert, AuditLogs, Identity Protection, custom anomaly tables, CloudAppEvents (cloud app activity drift), and EmailEvents (email pattern drift).'
+threat_pulse_domains: [identity]
+drill_down_prompt: 'Analyze user behavioral drift for {entity} — sign-in pattern changes, app usage shifts'
 ---
 
 # User Account Scope Drift Detection — Instructions
@@ -47,6 +49,14 @@ This skill detects **scope drift** — the gradual, often imperceptible expansio
 8. **[Known Pitfalls](#known-pitfalls)** - Edge cases and false positives
 9. **[Error Handling](#error-handling)** - Troubleshooting guide
 10. **[SVG Dashboard Generation](#svg-dashboard-generation)** - Visual dashboard from report
+
+**Investigation shortcuts:**
+- **User drift triage** (TP Q3): **Q6** + **Q7** (baseline vs recent — both drift scores + dimension ratios) → **Q11** (alert/incident correlation) → Tier 1 deep dives for flagged users
+- **Compromised user forensics** (TP Q3 + incident context): **Q6** + **Q7** (behavioral profile) → **Q8** (AuditLog changes — password/MFA/role changes, timestamps, actors) → **Q10** (Identity Protection risk events) → **Q11** (incident status/classification)
+- **Sign-in anomaly investigation** (TP Q3, high anomaly count): **Q6** + **Q7** (drift scores) → **Q9** (custom anomaly table — new IPs, device combos, geo novelty) → **Q10** (Identity Protection cross-reference)
+- **Cloud app activity expansion** (standalone or TP Q9): **Q6** (interactive baseline context) → **Q12** (CloudAppEvents — new action types, admin ops, impersonation) → **Q11** (alert correlation)
+
+> **⛔ Shortcut Default Rule:** When a matching shortcut exists for the investigation context, **use it** — don't run the full workflow. Only run the full query set when the user explicitly requests "full investigation", "comprehensive", or "deep dive". Shortcuts render only the report sections relevant to their query chain (plus Executive Summary and Recommendations, always).
 
 ---
 
@@ -430,7 +440,7 @@ Signinlogs_Anomalies_KQL_CL
 | where TimeGenerated > ago(14d)
 | where UserPrincipalName =~ '<UPN>'
 | extend Severity = case(
-    BaselineSize < 3 and AnomalyType startswith "NewNonInteractive", "Informational",
+    BaselineSize < 3, "Informational",
     CountryNovelty and CityNovelty and ArtifactHits >= 20, "High",
     ArtifactHits >= 10 or CountryNovelty or CityNovelty or StateNovelty, "Medium",
     ArtifactHits >= 5, "Low",

@@ -5,6 +5,7 @@
 **Tables:** StorageBlobLogs, AzureActivity, StorageMalwareScanningResults, CloudStorageAggregatedEvents, SecurityAlert, SecurityIncident, AuditLogs, SigninLogs, AADNonInteractiveUserSignInLogs  
 **Keywords:** blob storage, Azure Storage, exfiltration, credential access, SAS token, storage account key, AzCopy, reconnaissance, data destruction, ransomware, malware upload, anonymous access, container enumeration, lateral movement, defense evasion, data poisoning, C2, command and control, phishing hosting  
 **MITRE:** T1593.002, T1594, T1595.003, T1596, T1596.001, T1583.004, T1566.001, T1566.002, T1078.004, T1098.001, T1562.001, T1562.007, T1528, T1003, T1040, T1580, T1619, T1021.007, T1074.002, T1530, T1105, T1567.002, T1030, T1020, T1537, T1485, T1486, T1565  
+**Domains:** cloud, exposure  
 **Timeframe:** Last 30 days (configurable)
 
 ---
@@ -23,6 +24,37 @@ This document synthesizes that intelligence with official Microsoft security rec
 **Source:** [Inside the attack chain: Threat activity targeting Azure Blob Storage](https://www.microsoft.com/en-us/security/blog/2025/10/20/inside-the-attack-chain-threat-activity-targeting-azure-blob-storage/) — Microsoft Threat Intelligence, October 2025
 
 ---
+
+## Quick Reference — Query Index
+
+| # | Query | Use Case | Key Table |
+|---|-------|----------|-----------|
+| 1 | [Reconnaissance — External Enumeration of Blob Containers](#query-1-reconnaissance--external-enumeration-of-blob-containers) | Investigation | `StorageBlobLogs` |
+| 2 | [Reconnaissance — DNS/Subdomain Brute-Force (High-Volume 404s)](#query-2-reconnaissance--dnssubdomain-brute-force-high-volume-404s) | Dashboard | `StorageBlobLogs` |
+| 3 | [Credential Access — Storage Account Key Listing via Management API](#query-3-credential-access--storage-account-key-listing-via-management-api) | Investigation | `AzureActivity` |
+| 4 | [Credential Access — SAS Token Generation Events](#query-4-credential-access--sas-token-generation-events) | Investigation | `StorageBlobLogs` |
+| 5 | [Persistence — RBAC Role Assignment Changes on Storage Accounts](#query-5-persistence--rbac-role-assignment-changes-on-storage-accounts) | Investigation | `AzureActivity` |
+| 6 | [Persistence — Anonymous Access Level Changes](#query-6-persistence--anonymous-access-level-changes) | Investigation | `StorageBlobLogs` |
+| 7 | [Defense Evasion — Firewall Rule Modifications](#query-7-defense-evasion--firewall-rule-modifications) | Detection | `AzureActivity` |
+| 8 | [Defense Evasion — Diagnostic Logging Disabled](#query-8-defense-evasion--diagnostic-logging-disabled) | Investigation | `AzureActivity` |
+| 9 | [Defense Evasion — Defender for Storage Disabled](#query-9-defense-evasion--defender-for-storage-disabled) | Investigation | `AzureActivity` |
+| 10 | [Discovery — Unusual Container/Blob Enumeration Patterns](#query-10-discovery--unusual-containerblob-enumeration-patterns) | Investigation | `StorageBlobLogs` |
+| 11 | [Lateral Movement — Blob-Triggered Function Execution Anomalies](#query-11-lateral-movement--blob-triggered-function-execution-anomalies) | Detection | `StorageBlobLogs` |
+| 12 | [Collection — Large-Scale Data Staging via Copy Operations](#query-12-collection--large-scale-data-staging-via-copy-operations) | Investigation | `StorageBlobLogs` |
+| 13 | [Exfiltration — AzCopy or Azure Storage Explorer Usage](#query-13-exfiltration--azcopy-or-azure-storage-explorer-usage) | Investigation | `StorageBlobLogs` |
+| 14 | [Exfiltration — Static Website ($web Container) Abuse](#query-14-exfiltration--static-website-web-container-abuse) | Investigation | `StorageBlobLogs` |
+| 15 | [Exfiltration — Cross-Subscription/Cross-Tenant Data Transfer](#query-15-exfiltration--cross-subscriptioncross-tenant-data-transfer) | Investigation | `StorageBlobLogs` |
+| 16 | [C2 — Blob Metadata Manipulation (Covert Channel)](#query-16-c2--blob-metadata-manipulation-covert-channel) | Investigation | `StorageBlobLogs` |
+| 17 | [Impact — Mass Deletion Events (Ransomware/Destruction)](#query-17-impact--mass-deletion-events-ransomwaredestruction) | Investigation | `StorageBlobLogs` |
+| 18 | [Impact — Data Overwrite/Encryption (Ransomware Pattern)](#query-18-impact--data-overwriteencryption-ransomware-pattern) | Investigation | `StorageBlobLogs` |
+| 19 | [Malware Scanning Results — Malicious Uploads](#query-19-malware-scanning-results--malicious-uploads) | Investigation | — |
+| 20 | [Anomalous Storage Access — Suspicious Activity Patterns (Advanced H...](#query-20-anomalous-storage-access--suspicious-activity-patterns-advanced-hunting) | Detection | `CloudStorageAggregatedEvents` |
+| 21 | [Anomalous Anonymous Access Patterns (Advanced Hunting)](#query-21-anomalous-anonymous-access-patterns-advanced-hunting) | Detection | `CloudStorageAggregatedEvents` |
+| 22 | [Security Alerts — All Blob Storage Related Incidents](#query-22-security-alerts--all-blob-storage-related-incidents) | Detection | `SecurityAlert` + `SecurityIncident` |
+| 23 | [Full Chain — Identity → Storage Correlation](#query-23-full-chain--identity--storage-correlation) | Investigation | `SigninLogs` + `StorageBlobLogs` |
+| 24 | [Posture Check — Storage Accounts with Shared Key Access Enabled](#query-24-posture-check--storage-accounts-with-shared-key-access-enabled) | Posture | `AzureActivity` |
+| 25 | [Posture Check — Storage Account Key Rotation History](#query-25-posture-check--storage-account-key-rotation-history) | Posture | `AzureActivity` |
+
 
 ## Part 1: Attack Chain Summary
 

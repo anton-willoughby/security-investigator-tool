@@ -2,9 +2,10 @@
 
 **Created:** 2026-02-12  
 **Platform:** Both  
-**Tables:** CloudAppEvents, MessageEvents, MessagePostDeliveryEvents, MessageUrlInfo, UrlClickEvents, EmailEvents, DeviceProcessEvents, DeviceEvents, DeviceNetworkEvents, OfficeActivity, AuditLogs, SigninLogs, AADSignInEventsBeta, SecurityAlert, SecurityIncident, AlertInfo, AlertEvidence, IdentityLogonEvents  
+**Tables:** CloudAppEvents, MessageEvents, MessagePostDeliveryEvents, MessageUrlInfo, UrlClickEvents, EmailEvents, DeviceProcessEvents, DeviceEvents, DeviceNetworkEvents, OfficeActivity, AuditLogs, SigninLogs, EntraIdSignInEvents, SecurityAlert, SecurityIncident, AlertInfo, AlertEvidence, IdentityLogonEvents  
 **Keywords:** Teams, vishing, social engineering, tech support scam, email bombing, device code phishing, TeamsPhisher, DarkGate, Quick Assist, RMM, external access, guest access, federation, deepfake, Storm-1811, Storm-2372, Storm-1674, Storm-0324, Midnight Blizzard, Octo Tempest, Void Blizzard, Peach Sandstorm, Sangria Tempest, BRc4, ConvoC2, GraphRunner, AADInternals, TeamFiltration  
 **MITRE:** T1566 (Phishing), T1566.003 (Phishing via Service), T1598 (Phishing for Information), T1534 (Internal Spearphishing), T1204 (User Execution), T1219 (Remote Access Software), T1078 (Valid Accounts), T1528 (Steal Application Access Token), T1550.001 (Application Access Token), T1136 (Create Account), T1098 (Account Manipulation), T1071 (Application Layer Protocol), T1567 (Exfiltration Over Web Service), T1087 (Account Discovery), T1069 (Permission Groups Discovery), T1106 (Native API), TA0001, TA0003, TA0005, TA0006, TA0007, TA0009, TA0010, TA0011  
+**Domains:** identity, email, cloud  
 **Timeframe:** Last 30 days (configurable)
 
 ---
@@ -34,6 +35,34 @@ This document synthesizes intelligence from [Microsoft's "Disrupting threats tar
 | **Data Collection/Exfil** | GraphRunner, AADInternals, TeamFiltration for chat/file exfiltration | Void Blizzard, Peach Sandstorm |
 
 ---
+
+## Quick Reference — Query Index
+
+| # | Query | Use Case | Key Table |
+|---|-------|----------|-----------|
+| 1 | [Detect Potential Data Exfiltration via Teams External Chat](#query-1-detect-potential-data-exfiltration-via-teams-external-chat) | Detection | `CloudAppEvents` + `ParticipantInfo` |
+| 2 | [Detect Malicious Teams Content via MessageEvents](#query-2-detect-malicious-teams-content-via-messageevents) | Detection | `MessageEvents` |
+| 3 | [Detect Email Bombing Preceding Teams Vishing (Storm-1811 Pattern)](#query-3-detect-email-bombing-preceding-teams-vishing-storm-1811-pattern) | Detection | `EmailEvents` |
+| 4 | [Email Bombing → Teams Interaction Correlation](#query-4-email-bombing--teams-interaction-correlation) | Investigation | `CloudAppEvents` + multi |
+| 5 | [Suspicious External Help Desk Impersonation in Teams](#query-5-suspicious-external-help-desk-impersonation-in-teams) | Investigation | `MessageEvents` |
+| 6 | [Help Desk Impersonation → Process Execution Correlation](#query-6-help-desk-impersonation--process-execution-correlation) | Investigation | `MessageEvents` |
+| 7 | [Device Code Phishing Attempts (Storm-2372 Pattern)](#query-7-device-code-phishing-attempts-storm-2372-pattern) | Investigation | `SigninLogs` |
+| 8 | [Suspicious Teams Chat — External User One-on-One with Impersonation...](#query-8-suspicious-teams-chat--external-user-one-on-one-with-impersonation-keywords-sentinel) | Investigation | `CloudAppEvents` + `ParticipantInfo` |
+| 9 | [Quick Assist and RMM Tool Usage Following Teams Activity](#query-9-quick-assist-and-rmm-tool-usage-following-teams-activity) | Investigation | `DeviceNetworkEvents` + multi |
+| 10 | [Teams File Uploads and Access Summary (Sentinel)](#query-10-teams-file-uploads-and-access-summary-sentinel) | Dashboard | `OfficeActivity` |
+| 11 | [OAuth App Consent with Teams Permissions](#query-11-oauth-app-consent-with-teams-permissions) | Investigation | `AuditLogs` + `TeamsActivity` |
+| 12 | [Teams-Related Security Alert Summary with Incident Correlation](#query-12-teams-related-security-alert-summary-with-incident-correlation) | Dashboard | `SecurityAlert` + `SecurityIncident` |
+| 13 | [Suspicious Teams Access via Microsoft Graph API](#query-13-suspicious-teams-access-via-microsoft-graph-api) | Investigation | `AuditLogs` |
+| 14 | [Teams Meeting Join from Anomalous Locations](#query-14-teams-meeting-join-from-anomalous-locations) | Detection | `SigninLogs` |
+| 15 | [TeamsPhisher/DarkGate — External Chat Created with Process Execution](#query-15-teamsphisherdarkgate--external-chat-created-with-process-execution) | Investigation | `CloudAppEvents` + multi |
+| 16 | [Teams URL Click-Through to Malicious Sites](#query-16-teams-url-click-through-to-malicious-sites) | Investigation | `UrlClickEvents` |
+| 17 | [Teams ZAP Events — Retroactive Message Removal](#query-17-teams-zap-events--retroactive-message-removal) | Investigation | `MessagePostDeliveryEvents` |
+| 18 | [Suspicious Module Loaded via Teams Process](#query-18-suspicious-module-loaded-via-teams-process) | Investigation | `DeviceImageLoadEvents` |
+| 19 | [Cross-Tenant Teams Communication Anomalies](#query-19-cross-tenant-teams-communication-anomalies) | Detection | `CloudAppEvents` + multi |
+| 20 | [Device Code Phishing — Successful Device Code Auth with Risk Correl...](#query-20-device-code-phishing--successful-device-code-auth-with-risk-correlation-advanced-hunting) | Investigation | `AlertInfo` + `EntraIdSignInEvents` |
+| 21 | [Teams C2 Channel Detection — Adaptive Card / Webhook Abuse](#query-21-teams-c2-channel-detection--adaptive-card--webhook-abuse) | Detection | `CloudAppEvents` |
+| 22 | [Comprehensive Teams Threat Activity Dashboard](#query-22-comprehensive-teams-threat-activity-dashboard) | Dashboard | `CloudAppEvents` + multi |
+
 
 ## Part 1: Teams Attack Chain Anatomy
 
@@ -615,7 +644,7 @@ title: "Device code authentication by {{UserPrincipalName}} from {{Country}}"
 impactedAssets:
   - type: user
     identifier: accountUpn
-adaptation_notes: "Sentinel Data Lake query using SigninLogs. For CD, adapt to AADSignInEventsBeta with `LogonType == 'deviceCode'` and `Timestamp` column. See Query 20 for the AH equivalent."
+adaptation_notes: "Sentinel Data Lake query using SigninLogs. For CD, adapt to EntraIdSignInEvents with `LogonType == 'deviceCode'` and `Timestamp` column. See Query 20 for the AH equivalent."
 recommendedActions: "Verify whether device code auth was legitimate (IoT/conference room scenario). If unexpected, revoke sessions and investigate for token theft."
 -->
 ```kql
@@ -1091,7 +1120,7 @@ responseActions:
 // Storm-2372: Device code auth success + risk correlation
 // Platform: Defender XDR Advanced Hunting
 // MITRE: T1528 (Steal Application Access Token)
-AADSignInEventsBeta
+EntraIdSignInEvents
 | where Timestamp > ago(14d)
 | where ErrorCode == 0
 | where LogonType == "deviceCode"

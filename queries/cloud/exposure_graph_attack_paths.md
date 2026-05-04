@@ -1,36 +1,251 @@
 # ExposureGraph Critical Assets & Attack Paths - Complete Query Library
 
 **Created:** 2026-01-15  
-**Updated:** 2026-02-12  
+**Updated:** 2026-04-10  
 **Platform:** Microsoft Defender XDR | Azure Resource Graph  
 **Tables:** ExposureGraphNodes, ExposureGraphEdges, securityresources (ARG)  
-**Keywords:** exposure graph, critical assets, attack paths, vulnerabilities, RCE, privilege escalation, internet-facing, cloud resources, Azure, AWS, GCP, identity, storage, entra-userCookie, cookie chain, choke point, blast radius, highRiskVulnerabilityInsights, Key Vault, OpenAI, permissions, Owner, Contributor, Secrets Officer  
+**Keywords:** exposure graph, critical assets, attack paths, vulnerabilities, RCE, privilege escalation, internet-facing, cloud resources, Azure, AWS, GCP, identity, storage, entra-userCookie, cookie chain, choke point, blast radius, highRiskVulnerabilityInsights, Key Vault, OpenAI, permissions, Owner, Contributor, Secrets Officer, graph_find_blastradius, graph_exposure_perimeter, graph_find_walkable_paths, graph_find_connected_nodes, Sentinel Graph MCP  
 **MITRE:** T1068, T1190, T1078, T1550.004, T1539, T1552.001, TA0004, TA0001, TA0006, TA0008  
+**Domains:** exposure  
 **Timeframe:** Point-in-time (snapshot data)
 
 ---
 
 ## 📋 Overview
 
-This guide provides comprehensive KQL queries for finding critical assets and analyzing attack paths using the **ExposureGraphNodes** and **ExposureGraphEdges** tables in Microsoft Defender XDR Advanced Hunting, plus **Azure Resource Graph** queries for pre-computed cloud attack paths.
+This guide covers two approaches for analyzing the Exposure Management attack surface:
 
-**32 production-ready queries** organized into 12 sections for security operations.
+1. **Sentinel Graph MCP Tools** (recommended first pass) — purpose-built blast radius, exposure perimeter, walkable path, and connected node tools that return structured multi-hop results instantly. Start here for rapid triage.
+2. **KQL Queries** (deep dive / reference) — 32 production-ready queries against `ExposureGraphNodes` and `ExposureGraphEdges` tables in Advanced Hunting, plus Azure Resource Graph queries. Use these for custom analysis, fleet-wide sweeps, and scenarios the MCP tools don't cover.
 
 ---
 
-## 🎯 Query Categories
+## Quick Reference — Query Index
+
+**Investigation shortcuts:**
+- **Internet-facing critical asset with CVEs** (TP Q11, Q12): **Q21** (vuln profile) → **Q11** (CVE list) → edges query (all relationships) → **Q6** (attack paths to DCs)
+- **Exploitable CVEs across fleet** (TP Q12): **Q29** (blast radius ranking) → **Q30** (choke points) → **Q28** (critical users at risk)
+- **Attack paths to Azure resources from vulnerable devices** (TP Q11, Q12): **Q22** (direct cookie chains) → **Q23** (group-mediated) → **Q25** (deduplicated union)
+- **Permission escalation via attack paths** (TP Q11, Q12): **Q26** (role breakdown) → **Q27** (high-privilege users) — Reader vs Owner changes everything
+- **New environment discovery** (first run): **Q13** (node types) → **Q14** (edge types) → **Q20** (sample VM properties) — run first in new environments
+
+| # | Query | Use Case | Key Table |
+|---|-------|----------|-----------|
+| 1 | [Find All Critical Devices (Criticality Level < 4)](#query-1-find-all-critical-devices-criticality-level--4) | Investigation | `ExposureGraphNodes` |
+| 2 | [Critical Devices Exposed to Internet](#query-2-critical-devices-exposed-to-internet) | Investigation | `ExposureGraphNodes` |
+| 3 | [Critical Virtual Machines with High-Risk Vulnerabilities](#query-3-critical-virtual-machines-with-high-risk-vulnerabilities) | Investigation | `ExposureGraphNodes` |
+| 4 | [Internet-Facing Devices Vulnerable to Privilege Escalation](#query-4-internet-facing-devices-vulnerable-to-privilege-escalation) | Investigation | `ExposureGraphNodes` |
+| 5 | [Users Logged Into Multiple Critical Devices](#query-5-users-logged-into-multiple-critical-devices) | Investigation | `ExposureGraphEdges` + `ExposureGraphNodes` |
+| 6 | [Attack Paths - Devices with High-Risk Vulnerabilities → Users → Cri...](#query-6-attack-paths---devices-with-high-risk-vulnerabilities--users--critical-servers) | Investigation | `ExposureGraphEdges` + `ExposureGraphNodes` |
+| 7 | [Hybrid Attack Paths - Cloud to On-Premises](#query-7-hybrid-attack-paths---cloud-to-on-premises) | Investigation | `ExposureGraphEdges` + `ExposureGraphNodes` |
+| 8 | [Attack Paths from IPs to Critical VMs (Up to 3 Hops)](#query-8-attack-paths-from-ips-to-critical-vms-up-to-3-hops) | Investigation | `ExposureGraphEdges` + `ExposureGraphNodes` |
+| 9 | [Cloud Resources Across Azure, AWS, and GCP](#query-9-cloud-resources-across-azure-aws-and-gcp) | Investigation | `ExposureGraphNodes` |
+| 10 | [Critical Cloud Assets Summary](#query-10-critical-cloud-assets-summary) | Dashboard | `ExposureGraphNodes` |
+| 11 | [CVEs Affecting Critical Devices](#query-11-cves-affecting-critical-devices) | Investigation | `ExposureGraphEdges` + `ExposureGraphNodes` |
+| 12 | [Critical Devices with Multiple Vulnerabilities](#query-12-critical-devices-with-multiple-vulnerabilities) | Investigation | `ExposureGraphEdges` + `ExposureGraphNodes` |
+| 13 | [List All Unique Node Labels (Asset Types)](#query-13-list-all-unique-node-labels-asset-types) | Investigation | `ExposureGraphNodes` |
+| 14 | [List All Unique Edge Labels (Relationship Types)](#query-14-list-all-unique-edge-labels-relationship-types) | Investigation | `ExposureGraphEdges` |
+| 15 | [Incoming Connections to Virtual Machines](#query-15-incoming-connections-to-virtual-machines) | Investigation | `ExposureGraphEdges` + `ExposureGraphNodes` |
+| 16 | [Outgoing Connections from Virtual Machines](#query-16-outgoing-connections-from-virtual-machines) | Investigation | `ExposureGraphEdges` + `ExposureGraphNodes` |
+| 17 | [Assets from ServiceNow CMDB](#query-17-assets-from-servicenow-cmdb) | Investigation | `ExposureGraphNodes` + multi |
+| 18 | [CVEs from Tenable Vulnerability Scanner](#query-18-cves-from-tenable-vulnerability-scanner) | Investigation | `ExposureGraphEdges` + `TenableInfo` |
+| 19 | [CVEs from Rapid7 Vulnerability Scanner](#query-19-cves-from-rapid7-vulnerability-scanner) | Investigation | `ExposureGraphEdges` |
+| 20 | [Sample Node Properties for Virtual Machines](#query-20-sample-node-properties-for-virtual-machines) | Investigation | `ExposureGraphNodes` |
+| 21 | [Devices with High-Risk Vulnerability Insights (Entry Points)](#query-21-devices-with-high-risk-vulnerability-insights-entry-points) | Investigation | `ExposureGraphNodes` |
+| 22 | [Direct Attack Paths — VulnDevice → Cookie → User → Target (by Targe...](#query-22-direct-attack-paths--vulndevice--cookie--user--target-by-target-type) | Investigation | `ExposureGraphEdges` + `ExposureGraphNodes` |
+| 23 | [Group-Mediated Attack Paths — VulnDevice → Cookie → User → Group → ...](#query-23-group-mediated-attack-paths--vulndevice--cookie--user--group--target) | Investigation | `ExposureGraphEdges` + `ExposureGraphNodes` |
+| 24 | [Discover ALL Intermediary Patterns Between Devices and a Target Type](#query-24-discover-all-intermediary-patterns-between-devices-and-a-target-type) | Investigation | `ExposureGraphEdges` + `ExposureGraphNodes` |
+| 25 | [Comprehensive Deduplicated Path Count — Union All Patterns](#query-25-comprehensive-deduplicated-path-count--union-all-patterns) | Investigation | `ExposureGraphEdges` + `ExposureGraphNodes` |
+| 26 | [Permission Role Breakdown on Attack Paths](#query-26-permission-role-breakdown-on-attack-paths) | Dashboard | `ExposureGraphEdges` + `ExposureGraphNodes` |
+| 27 | [High-Privilege Users Reachable via Attack Paths](#query-27-high-privilege-users-reachable-via-attack-paths) | Investigation | `ExposureGraphEdges` + `ExposureGraphNodes` |
+| 28 | [Critical Users (by Entra Criticality) Reachable from Vulnerable Dev...](#query-28-critical-users-by-entra-criticality-reachable-from-vulnerable-devices) | Investigation | `ExposureGraphEdges` + `ExposureGraphNodes` |
+| 29 | [Top Entry-Point Devices by Blast Radius](#query-29-top-entry-point-devices-by-blast-radius) | Triage | `ExposureGraphEdges` + `ExposureGraphNodes` |
+| 30 | [Choke Point Detection — Users in Most Attack Paths](#query-30-choke-point-detection--users-in-most-attack-paths) | Detection | `ExposureGraphEdges` + `ExposureGraphNodes` |
+
+
+## 🚀 Sentinel Graph MCP Tools — Recommended First Pass
+
+The Sentinel Exposure Graph MCP server provides four specialized tools that operate directly on the ExposureGraph. These are **faster and more effective** than raw KQL for common attack path scenarios — they handle multi-hop traversal, permission chain resolution, and criticality correlation automatically.
+
+**When to use MCP tools vs KQL:**
+
+| Scenario | Use MCP Tools | Use KQL |
+|----------|---------------|---------|
+| "What can this compromised device reach?" | `graph_find_blastradius` | — |
+| "What's exposed to the internet that can reach this target?" | `graph_exposure_perimeter` | — |
+| "Show the full path from device A to resource B" | `graph_find_walkable_paths` | — |
+| "What storage accounts are 2 hops from this VM?" | `graph_find_connected_nodes` | — |
+| Fleet-wide critical asset inventory | — | Query 1–4 |
+| Cookie chain analysis across all devices | — | Queries 21–25 |
+| Choke point detection (users in most paths) | — | Query 30 |
+| Permission role distribution across all paths | — | Queries 26–28 |
+| Azure Resource Graph pre-computed attack paths | — | Queries 31–32 |
+| Custom multi-join analysis or aggregation | — | Any custom KQL |
+
+### Tool 1: `graph_find_blastradius`
+
+**Purpose:** Given a source asset (device, identity, etc.), discover all downstream targets reachable via walkable edges (managed identity auth, permissions, cookie chains, group membership). Returns full multi-hop paths with criticality, risk score, and vulnerability status at each node.
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `sourceName` | Yes | Name of the source node (e.g., `contoso-srv1`, a username, a SPN name) |
+
+**Example:**
+```
+graph_find_blastradius(sourceName="contoso-srv1")
+```
+
+**Returns:** Array of walkable paths, each containing ordered steps:
+- `StepIndex` — hop number (0 = source)
+- `SourceNodeName/Label` → `EdgeLabel` → `TargetNodeName/Label`
+- `Criticality` — target asset criticality level (0 = highest)
+- `HasVulnerabilities` — whether target has known CVEs
+
+**Typical attack chains discovered:**
+```
+Device → can authenticate as → ManagedIdentity → has permissions to → StorageAccount (Contributor)
+Device → contains → entra-userCookie → can authenticate as → User → has permissions to → KeyVault
+```
+
+**When results are most valuable:**
+- Source device is under active attack (brute-force, anomalous behavior)
+- Source device has high-severity CVEs (entry point for exploitation)
+- Investigating blast radius after a confirmed compromise
+
+---
+
+### Tool 2: `graph_exposure_perimeter`
+
+**Purpose:** Given a target asset, find the **inbound exposure perimeter** — the set of internet-facing or externally-reachable nodes that have walkable paths TO the target. This is the inverse of blast radius: "what entry points can reach this critical asset?"
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `targetName` | Yes | Name of the target node to find exposure paths to |
+
+**Example:**
+```
+graph_exposure_perimeter(targetName="dc01.contoso.com")
+```
+
+**Returns:** Array of perimeter nodes with:
+- `NodeName/Label` — the externally-reachable entry point
+- `Criticality`, `RiskScore`, `HasVulnerabilities`
+- `NumberOfAllNeighbours` — connectivity degree
+- `Edges` — the edges connecting this perimeter node
+
+**Known limitation:** This tool may return empty results for assets that ARE network-reachable (confirmed via public IP routing and brute-force traffic) but don't have formal ExposureGraph perimeter classification. When empty, fall back to KQL edge analysis:
+```kql
+ExposureGraphEdges
+| where TargetNodeName == "<asset>"
+| where EdgeLabel == "routes traffic to"
+| project SourceNodeName, SourceNodeLabel
+```
+
+---
+
+### Tool 3: `graph_find_walkable_paths`
+
+**Purpose:** Find the specific walkable path(s) between a known source and a known target. Returns full node and edge detail including RBAC role assignments on permission edges.
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `sourceName` | Yes | Source node name |
+| `targetName` | Yes | Target node name |
+
+**Example:**
+```
+graph_find_walkable_paths(sourceName="contoso-srv1", targetName="contoso-storage1")
+```
+
+**Returns:** Ordered nodes and edges with full permission detail:
+- Each node includes `Criticality`, `RiskScore`, `NumberOfAllNeighbours`
+- Permission edges include `roles[]` with role name, actions, dataActions, and roleAssignmentId
+- Flags like `isOverProvisioned` and `isIdentityInactive` on connected identities
+
+**Best for:** Validating a suspected attack path end-to-end, documenting the exact permission chain for remediation, identifying over-provisioned identities along the path.
+
+---
+
+### Tool 4: `graph_find_connected_nodes`
+
+**Purpose:** Find all nodes of a specific type within N hops of a source node. Useful for discovering what resources a compromised asset can reach by type (storage accounts, VMs, key vaults, etc.).
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `sourceName` | Yes | Source node name |
+| `sourceNodeLabel` | Yes | Source node type (e.g., `microsoft.compute/virtualmachines`) |
+| `targetNodeLabel` | Yes | Target node type to search for (e.g., `microsoft.storage/storageaccounts`) |
+| `maxHops` | Yes | Maximum traversal depth (1–3 recommended; higher = very large result sets) |
+
+**Example:**
+```
+graph_find_connected_nodes(
+    sourceName="contoso-srv1",
+    sourceNodeLabel="microsoft.compute/virtualmachines",
+    targetNodeLabel="microsoft.storage/storageaccounts",
+    maxHops=2
+)
+```
+
+**Returns:** All matching target nodes with full edge detail, including:
+- Permission roles and whether identities are over-provisioned or inactive
+- Group memberships and role inheritance chains
+- Criticality levels on discovered nodes
+
+**⚠️ Large result sets:** With `maxHops=2` on connected assets, this can return 1MB+ of data. Use targeted `targetNodeLabel` filters to constrain results.
+
+---
+
+### Tool 5: `graph_get_context`
+
+**Purpose:** Retrieve the full graph schema — all node types, edge types, and their relationships. Use this before querying if you need to discover available `NodeLabel` or `EdgeLabel` values.
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `GraphName` | Yes | Always use `SystemScenarioEKGGraph` |
+
+**Example:**
+```
+graph_get_context(GraphName="SystemScenarioEKGGraph")
+```
+
+---
+
+### Recommended MCP Workflow for Asset Investigation
+
+When investigating a specific asset (e.g., a device under attack, a compromised identity):
+
+1. **Blast radius first:** `graph_find_blastradius(sourceName="<asset>")` — what can it reach?
+2. **Exposure perimeter:** `graph_exposure_perimeter(targetName="<asset>")` — what entry points lead here?
+3. **Specific paths:** If blast radius reveals a critical target, `graph_find_walkable_paths(sourceName="<asset>", targetName="<critical-target>")` — get the full chain with permissions
+4. **Type-specific discovery:** `graph_find_connected_nodes(...)` — find all key vaults, storage accounts, or VMs within reach
+5. **Deep dive:** Use the KQL queries below for fleet-wide analysis, custom joins, or scenarios not covered by the MCP tools
+
+---
+
+## 🎯 KQL Query Categories (Deep Dive / Reference)
 
 ### 1. Critical Devices & Assets (Queries 1-4)
 - **Query 1**: All critical devices (criticality < 4)
 - **Query 2**: Critical devices exposed to internet
-- **Query 3**: Critical VMs vulnerable to RCE
+- **Query 3**: Critical VMs with high-risk vulnerabilities
 - **Query 4**: Internet-facing devices with privilege escalation vulns
 
 ### 2. Critical Users & Identities (Query 5)
 - **Query 5**: Users logged into multiple critical devices
 
 ### 3. Attack Path Analysis (Queries 6-8)
-- **Query 6**: Multi-hop attack paths (RCE device → User → Critical server)
+- **Query 6**: Multi-hop attack paths (Vuln device → User → Critical server)
 - **Query 7**: Hybrid cloud-to-on-premises attack paths
 - **Query 8**: IP-to-VM attack paths (up to 3 hops)
 
@@ -122,9 +337,12 @@ Common edge types (by volume):
 | `criticalityLevel` | dynamic | Nested object: `{criticalityLevel: int, ruleNames: [...]}` |
 | `exposureScore` | real | Device exposure score (0-100) |
 | `riskScore` | real | Device risk score (0-100) |
-| `publicIP` | string | Public IP if internet-facing |
-| `IsInternetFacing` | bool | Legacy internet-facing flag |
-| `exposedToInternet` | bool | Current internet-facing flag |
+| `publicIP` | string | Public IP assigned to device — does NOT confirm internet reachability (NSG/firewall may block all inbound) |
+| `IsInternetFacing` | bool | Legacy internet-facing flag — **unreliable**, not populated in many environments |
+| `exposedToInternet` | bool | Current internet-facing flag — **unreliable**, not populated in many environments |
+| `isCustomerFacing` | bool | Business-function flag — **NOT internet exposure**. Devices serving auth, file sharing, or customer roles get flagged regardless of reachability |
+
+> ⚠️ **PITFALL: Internet-facing detection**: `rawData.IsInternetFacing`, `rawData.exposedToInternet`, and `rawData.isCustomerFacing` are all **unreliable** for determining actual internet exposure. The authoritative source is **`DeviceInfo.IsInternetFacing`** — a boolean maintained by MDE via external scans and observed inbound connections, auto-expiring after 48h. See `queries/network/internet_exposure_analysis.md` Query 1 and [MS Docs](https://learn.microsoft.com/en-us/defender-endpoint/internet-facing-devices#use-advanced-hunting). Queries in this file that filter on `rawData.IsInternetFacing` may return 0 results in environments where the property is not populated — fall back to the `DeviceInfo` approach.
 
 > ⚠️ **PITFALL**: `vulnerableToRCE` and `hasVulnerabilities` do NOT reliably exist as top-level properties on most devices. Always use `highRiskVulnerabilityInsights` instead. The legacy `vulnerableToRCE` property exists only on a subset of nodes.
 
@@ -177,44 +395,15 @@ This maps to MITRE ATT&CK:
 
 ### Find Your Most Critical Assets
 
-```kql
-ExposureGraphNodes
-| where set_has_element(Categories, "device")
-| where isnotnull(NodeProperties.rawData.criticalityLevel)
-| where NodeProperties.rawData.criticalityLevel.criticalityLevel < 4
-| extend CriticalityLevel = tostring(NodeProperties.rawData.criticalityLevel.criticalityLevel)
-| project 
-    DeviceName = NodeName,
-    CriticalityLevel,
-    Categories,
-    NodeLabel
-| order by CriticalityLevel asc
-```
-
-**Sample Results:**
-```
-DeviceName                                  CriticalityLevel  Categories                           NodeLabel
-ashtravel-dc.ashtravel.alpineskihouse.co   0                 [compute, device, virtual_machine]   microsoft.compute/virtualmachines
-mb-dc1.internal.niseko.alpineskihouse.co   0                 [compute, device, virtual_machine]   microsoft.compute/virtualmachines
-main-dc.zava-corp.com                      1                 [compute, device, virtual_machine]   microsoft.compute/virtualmachines
-```
+See **Query 1** in the Complete Query Library below.
 
 ---
 
 ### Find Internet-Exposed Critical Assets
 
-```kql
-ExposureGraphNodes
-| where set_has_element(Categories, "device")
-| where isnotnull(NodeProperties.rawData.criticalityLevel)
-| where NodeProperties.rawData.criticalityLevel.criticalityLevel < 4
-| where isnotnull(NodeProperties.rawData.IsInternetFacing)
-| project 
-    DeviceName = NodeName,
-    CriticalityLevel = NodeProperties.rawData.criticalityLevel.criticalityLevel,
-    InternetFacing = "Yes"
-| order by CriticalityLevel asc
-```
+> ⚠️ **The ExposureGraph `rawData.IsInternetFacing` property is unreliable** — not populated in many environments. For authoritative internet-facing classification, use `DeviceInfo.IsInternetFacing` from MDE (see `queries/network/internet_exposure_analysis.md` Query 1). Query 2 below uses the ExposureGraph property as a topology filter — expect 0 results in environments where it’s not populated.
+
+See **Query 2** in the Complete Query Library below.
 
 ---
 
@@ -307,7 +496,7 @@ ExposureGraphEdges
 4. **Query 12** - Rank by vulnerability count
 
 ### Attack Path Investigation
-1. **Query 6** - Multi-hop attack paths (RCE → User → Critical Server)
+1. **Query 6** - Multi-hop attack paths (Vuln device → User → Critical Server)
 2. **Query 7** - Hybrid cloud/on-prem paths
 3. **Query 8** - External IP exposure paths
 4. **Query 22** - Cookie chain: VulnDevice → Cookie → User → Azure Resource
@@ -438,8 +627,11 @@ ExposureGraphNodes
 ```
 
 ### Step 2: Check Internet Exposure
+
+> ⚠️ **Recommended:** Use `DeviceInfo.IsInternetFacing` for authoritative internet-facing classification (see `queries/network/internet_exposure_analysis.md` Query 1). The ExposureGraph `rawData.IsInternetFacing` property below is **unreliable** — not populated in many environments.
+
 ```kql
-// Query 2 - Filter for internet-facing
+// ExposureGraph topology filter (may return 0 if property not populated — use DeviceInfo instead)
 ExposureGraphNodes
 | where set_has_element(Categories, "device")
 | where isnotnull(NodeProperties.rawData.criticalityLevel)
@@ -490,14 +682,11 @@ See **Query 6** below in the complete query library for multi-hop attack path de
 
 ---
 
-**Last Updated**: 2026-02-12  
-**Query File**: ExposureGraph_CriticalAssets_AttackPaths.kql  
-**Author**: Security Investigation System
 ## 📚 Complete Query Library
 
-### SECTION 1: Critical Devices & Assets
+## SECTION 1: Critical Devices & Assets
 
-#### Query 1: Find All Critical Devices (Criticality Level < 4)
+### Query 1: Find All Critical Devices (Criticality Level < 4)
 
 **Description**: Lists all devices with high criticality (levels 1-3, where lower = more critical)  
 **Use Case**: Identify most important assets requiring priority protection
@@ -522,10 +711,12 @@ ExposureGraphNodes
 | order by CriticalityLevel asc
 ```
 
-#### Query 2: Critical Devices Exposed to Internet
+### Query 2: Critical Devices Exposed to Internet
 
 **Description**: Find critical devices that are internet-facing (high risk)  
 **Use Case**: Priority remediation - critical assets with external exposure
+
+> ⚠️ **`rawData.IsInternetFacing` is unreliable** — not populated in many environments. This query may return 0 results. For authoritative internet-facing classification, use `DeviceInfo.IsInternetFacing` (see `queries/network/internet_exposure_analysis.md` Query 1).
 
 <!-- cd-metadata
 cd_ready: false
@@ -549,10 +740,12 @@ ExposureGraphNodes
 | order by CriticalityLevel asc
 ```
 
-#### Query 3: Critical Virtual Machines Vulnerable to RCE
+### Query 3: Critical Virtual Machines with High-Risk Vulnerabilities
 
-**Description**: Find critical VMs exposed to internet with Remote Code Execution vulnerabilities  
+**Description**: Find critical VMs with high-risk vulnerability insights (RCE, privilege escalation)  
 **Use Case**: Highest risk assets requiring immediate attention
+
+> ⚠️ **`rawData.exposedToInternet` is unreliable** — not populated in many environments. This query may return 0 results. For authoritative internet exposure, cross-reference with `DeviceInfo.IsInternetFacing`.
 
 <!-- cd-metadata
 cd_ready: false
@@ -561,24 +754,32 @@ adaptation_notes: "ExposureGraph snapshot data — point-in-time VM vulnerabilit
 ```kql
 ExposureGraphNodes
 | where set_has_element(Categories, "virtual_machine")
-| where isnotnull(NodeProperties.rawData.exposedToInternet)
-| where isnotnull(NodeProperties.rawData.vulnerableToRCE)
+| where isnotnull(NodeProperties.rawData.highRiskVulnerabilityInsights)
+| extend VulnInsights = NodeProperties.rawData.highRiskVulnerabilityInsights
+| extend HasHighOrCritical = tobool(VulnInsights.hasHighOrCritical),
+    MaxCvss = toreal(VulnInsights.maxCvssScore),
+    VulnToRCE = tobool(VulnInsights.vulnerableToRemoteCodeExecution),
+    VulnToPrivEsc = tobool(VulnInsights.vulnerableToPrivilegeEscalation)
 | extend OSType = tostring(NodeProperties.rawData.osType)
 | project 
     VMName = NodeName,
     VMId = NodeId,
     NodeLabel,
     OSType,
-    ExposedToInternet = "Yes",
-    VulnerableToRCE = "Yes",
+    MaxCvss,
+    HasHighOrCritical,
+    VulnToRCE,
+    VulnToPrivEsc,
     Categories
-| order by VMName asc
+| order by MaxCvss desc
 ```
 
-#### Query 4: Internet-Facing Devices Vulnerable to Privilege Escalation
+### Query 4: Internet-Facing Devices Vulnerable to Privilege Escalation
 
 **Description**: Find internet-facing devices with privilege escalation vulnerabilities  
 **Use Case**: Identify devices vulnerable to privilege escalation attacks from external sources
+
+> ⚠️ **`rawData.IsInternetFacing` and `rawData.VulnerableToPrivilegeEscalation` are legacy properties** — not populated in many environments. This query may return 0 results. Prefer `highRiskVulnerabilityInsights.vulnerableToPrivilegeEscalation` (Query 21) and cross-reference with `DeviceInfo.IsInternetFacing`.
 
 <!-- cd-metadata
 cd_ready: false
@@ -602,9 +803,9 @@ ExposureGraphNodes
 
 ---
 
-### SECTION 2: Critical Users & Identities
+## SECTION 2: Critical Users & Identities
 
-#### Query 5: Users Logged Into Multiple Critical Devices
+### Query 5: Users Logged Into Multiple Critical Devices
 
 **Description**: Find users with access to more than one critical device (potential lateral movement risk)  
 **Use Case**: Identify users with broad access to critical infrastructure
@@ -645,11 +846,11 @@ ExposureGraphEdges
 
 ---
 
-### SECTION 3: Attack Path Analysis
+## SECTION 3: Attack Path Analysis
 
-#### Query 6: Attack Paths - Devices with RCE → Users → Critical Servers
+### Query 6: Attack Paths - Devices with High-Risk Vulnerabilities → Users → Critical Servers
 
-**Description**: Find attack paths where RCE-vulnerable devices connect to users who can remotely login to critical servers  
+**Description**: Find attack paths where devices with high-risk vulnerabilities connect to users who can remotely login to critical servers  
 **Use Case**: Identify multi-hop attack chains from vulnerable endpoints to critical assets
 
 <!-- cd-metadata
@@ -659,14 +860,14 @@ adaptation_notes: "ExposureGraph snapshot data — point-in-time attack path gra
 ```kql
 let IdentitiesAndCriticalDevices = ExposureGraphNodes
 | where 
-    // Critical devices & devices with RCE vulnerabilities
+    // Critical devices & devices with high-risk vulnerabilities
     (set_has_element(Categories, "device") and 
         (
             // Critical devices
             (isnotnull(NodeProperties.rawData.criticalityLevel) and NodeProperties.rawData.criticalityLevel.criticalityLevel < 4)
             or 
-            // Devices with RCE vulnerability
-            isnotnull(NodeProperties.rawData.vulnerableToRCE)
+            // Devices with high-risk vulnerabilities
+            isnotnull(NodeProperties.rawData.highRiskVulnerabilityInsights)
         )
     )
     or 
@@ -675,25 +876,26 @@ let IdentitiesAndCriticalDevices = ExposureGraphNodes
 ExposureGraphEdges
 | where EdgeLabel in~ ("Can Authenticate As", "CanRemoteInteractiveLogonTo")
 | make-graph SourceNodeId --> TargetNodeId with IdentitiesAndCriticalDevices on NodeId
-| graph-match (DeviceWithRCE)-[CanConnectAs]->(Identity)-[CanRemoteLogin]->(CriticalDevice)
+| graph-match (DeviceWithVuln)-[CanConnectAs]->(Identity)-[CanRemoteLogin]->(CriticalDevice)
     where 
         CanConnectAs.EdgeLabel =~ "Can Authenticate As" and
         CanRemoteLogin.EdgeLabel =~ "CanRemoteInteractiveLogonTo" and
         set_has_element(Identity.Categories, "identity") and 
-        set_has_element(DeviceWithRCE.Categories, "device") and isnotnull(DeviceWithRCE.NodeProperties.rawData.vulnerableToRCE) and
+        set_has_element(DeviceWithVuln.Categories, "device") and isnotnull(DeviceWithVuln.NodeProperties.rawData.highRiskVulnerabilityInsights) and
         set_has_element(CriticalDevice.Categories, "device") and isnotnull(CriticalDevice.NodeProperties.rawData.criticalityLevel)
     project 
-        RCEDeviceName = DeviceWithRCE.NodeName,
-        RCEDeviceIds = DeviceWithRCE.EntityIds,
+        VulnDeviceName = DeviceWithVuln.NodeName,
+        VulnDeviceIds = DeviceWithVuln.EntityIds,
+        MaxCvss = toreal(DeviceWithVuln.NodeProperties.rawData.highRiskVulnerabilityInsights.maxCvssScore),
         IdentityName = Identity.NodeName,
         IdentityIds = Identity.EntityIds,
         CriticalDeviceName = CriticalDevice.NodeName,
         CriticalDeviceIds = CriticalDevice.EntityIds,
         CriticalityLevel = CriticalDevice.NodeProperties.rawData.criticalityLevel.criticalityLevel
-| order by CriticalityLevel asc
+| order by CriticalityLevel asc, MaxCvss desc
 ```
 
-#### Query 7: Hybrid Attack Paths - Cloud to On-Premises
+### Query 7: Hybrid Attack Paths - Cloud to On-Premises
 
 **Description**: Identify potential hybrid attack paths between cloud VMs and on-premises devices  
 **Use Case**: Detect lateral movement opportunities across cloud/on-prem boundaries
@@ -725,7 +927,7 @@ ExposureGraphEdges
 | order by CloudVMName asc
 ```
 
-#### Query 8: Attack Paths from IPs to Critical VMs (Up to 3 Hops)
+### Query 8: Attack Paths from IPs to Critical VMs (Up to 3 Hops)
 
 **Description**: Show all paths from IP addresses to virtual machines passing through up to 3 assets  
 **Use Case**: Understand external network exposure and access paths to VMs
@@ -754,9 +956,9 @@ ExposureGraphEdges
 
 ---
 
-### SECTION 4: Cloud Multi-Environment Analysis
+## SECTION 4: Cloud Multi-Environment Analysis
 
-#### Query 9: Cloud Resources Across Azure, AWS, and GCP
+### Query 9: Cloud Resources Across Azure, AWS, and GCP
 
 **Description**: Count and categorize cloud resources from different providers  
 **Use Case**: Multi-cloud visibility and asset inventory
@@ -781,7 +983,7 @@ ExposureGraphNodes
 | order by CloudProvider asc, ResourceCount desc
 ```
 
-#### Query 10: Critical Cloud Assets Summary
+### Query 10: Critical Cloud Assets Summary
 
 **Description**: Inventory of critical assets across all cloud providers  
 **Use Case**: Executive dashboard of critical cloud infrastructure
@@ -811,9 +1013,9 @@ ExposureGraphNodes
 
 ---
 
-### SECTION 5: Vulnerability Analysis on Critical Assets
+## SECTION 5: Vulnerability Analysis on Critical Assets
 
-#### Query 11: CVEs Affecting Critical Devices
+### Query 11: CVEs Affecting Critical Devices
 
 **Description**: Find all CVE vulnerabilities affecting critical devices  
 **Use Case**: Prioritize vulnerability remediation for critical assets
@@ -840,7 +1042,7 @@ ExposureGraphEdges
 | order by CriticalityLevel asc, CVE desc
 ```
 
-#### Query 12: Critical Devices with Multiple Vulnerabilities
+### Query 12: Critical Devices with Multiple Vulnerabilities
 
 **Description**: Rank critical devices by number of CVE vulnerabilities  
 **Use Case**: Identify most vulnerable critical assets for remediation priority
@@ -868,9 +1070,9 @@ ExposureGraphEdges
 
 ---
 
-### SECTION 6: Exploration & Discovery Queries
+## SECTION 6: Exploration & Discovery Queries
 
-#### Query 13: List All Unique Node Labels (Asset Types)
+### Query 13: List All Unique Node Labels (Asset Types)
 
 **Description**: Discover all types of nodes in your exposure graph  
 **Use Case**: Understand what asset types are tracked in your environment
@@ -885,7 +1087,7 @@ ExposureGraphNodes
 | order by NodeCount desc
 ```
 
-#### Query 14: List All Unique Edge Labels (Relationship Types)
+### Query 14: List All Unique Edge Labels (Relationship Types)
 
 **Description**: Discover all relationship types in your exposure graph  
 **Use Case**: Understand what connections and permissions exist
@@ -900,7 +1102,7 @@ ExposureGraphEdges
 | order by EdgeCount desc
 ```
 
-#### Query 15: Incoming Connections to Virtual Machines
+### Query 15: Incoming Connections to Virtual Machines
 
 **Description**: Find all types of assets that can connect TO virtual machines  
 **Use Case**: Understand attack surface and access paths to VMs
@@ -919,7 +1121,7 @@ ExposureGraphEdges
 | order by ConnectionCount desc
 ```
 
-#### Query 16: Outgoing Connections from Virtual Machines
+### Query 16: Outgoing Connections from Virtual Machines
 
 **Description**: Find all types of assets that virtual machines can connect TO  
 **Use Case**: Understand what VMs can access (lateral movement potential)
@@ -940,9 +1142,9 @@ ExposureGraphEdges
 
 ---
 
-### SECTION 7: External Data Source Integrations
+## SECTION 7: External Data Source Integrations
 
-#### Query 17: Assets from ServiceNow CMDB
+### Query 17: Assets from ServiceNow CMDB
 
 **Description**: Find all assets imported from ServiceNow CMDB connector  
 **Use Case**: Validate ServiceNow integration and asset correlation
@@ -963,7 +1165,7 @@ ExposureGraphNodes
 | take 100
 ```
 
-#### Query 18: CVEs from Tenable Vulnerability Scanner
+### Query 18: CVEs from Tenable Vulnerability Scanner
 
 **Description**: Find all vulnerabilities reported by Tenable on ingested assets  
 **Use Case**: Validate Tenable integration and vulnerability tracking
@@ -984,7 +1186,7 @@ ExposureGraphEdges
 | take 100
 ```
 
-#### Query 19: CVEs from Rapid7 Vulnerability Scanner
+### Query 19: CVEs from Rapid7 Vulnerability Scanner
 
 **Description**: Find all vulnerabilities reported by Rapid7 on ingested assets  
 **Use Case**: Validate Rapid7 integration and vulnerability tracking
@@ -1007,9 +1209,9 @@ ExposureGraphEdges
 
 ---
 
-### SECTION 8: Sample Property Inspection
+## SECTION 8: Sample Property Inspection
 
-#### Query 20: Sample Node Properties for Virtual Machines
+### Query 20: Sample Node Properties for Virtual Machines
 
 **Description**: View sample NodeProperties structure for VMs to understand available data  
 **Use Case**: Schema exploration and understanding available properties
@@ -1027,11 +1229,11 @@ ExposureGraphNodes
 
 ---
 
-### SECTION 9: Vulnerable Device Attack Paths — Cookie Chain Analysis
+## SECTION 9: Vulnerable Device Attack Paths — Cookie Chain Analysis
 
 > **Core concept**: When a device has high-severity vulnerabilities, an attacker who compromises it can extract cached `entra-userCookie` tokens to impersonate logged-in users and pivot to ANY Azure resource those users have permissions on — without needing the user's password or MFA. These queries map that blast radius.
 
-#### Query 21: Devices with High-Risk Vulnerability Insights (Entry Points)
+### Query 21: Devices with High-Risk Vulnerability Insights (Entry Points)
 
 **Description**: Find all devices flagged with high-risk vulnerability insights — the entry points for identity-based attack paths  
 **Use Case**: Identify the device population that feeds into attack path analysis  
@@ -1057,7 +1259,7 @@ ExposureGraphNodes
 
 > **⚠️ PITFALL**: Do NOT use `NodeProperties.rawData.vulnerableToRCE` or `NodeProperties.rawData.hasVulnerabilities` — these legacy properties exist only on a subset of devices. The `highRiskVulnerabilityInsights` object is the reliable, comprehensive property. Always check `hasHighOrCritical` within it.
 
-#### Query 22: Direct Attack Paths — VulnDevice → Cookie → User → Target (by Target Type)
+### Query 22: Direct Attack Paths — VulnDevice → Cookie → User → Target (by Target Type)
 
 **Description**: Map all direct 3-hop identity-based attack paths from vulnerable devices through cached cookies to Azure resources, broken down by target resource type  
 **Use Case**: Understand which Azure resource types are reachable from compromised devices  
@@ -1096,7 +1298,7 @@ ExposureGraphEdges
 
 **Expected target types**: `microsoft.keyvault/vaults`, `microsoft.storage/storageaccounts`, `microsoft.cognitiveservices/accounts`, `microsoft.compute/virtualmachines`, `microsoft.logic/workflows`, `microsoft.containerservice/managedclusters`, `microsoft.kubernetes/connectedclusters`, etc.
 
-#### Query 23: Group-Mediated Attack Paths — VulnDevice → Cookie → User → Group → Target
+### Query 23: Group-Mediated Attack Paths — VulnDevice → Cookie → User → Group → Target
 
 **Description**: Map 4-hop attack paths where users access resources via group membership (adds ~15-25% more paths vs direct-only)  
 **Use Case**: Capture attack paths that go through Entra ID group RBAC assignments  
@@ -1133,7 +1335,7 @@ ExposureGraphEdges
 | order by UniqueDeviceTargetPairs desc
 ```
 
-#### Query 24: Discover ALL Intermediary Patterns Between Devices and a Target Type
+### Query 24: Discover ALL Intermediary Patterns Between Devices and a Target Type
 
 **Description**: Automatically discover every 3-hop path pattern (node labels and edge labels) between vulnerable devices and a specific target resource type  
 **Use Case**: Find attack chain patterns you didn't know existed — critical for comprehensive coverage  
@@ -1175,7 +1377,7 @@ ExposureGraphEdges
 | `user` | `group` | `frequently logged in by` → `member of` → `has role on` | Medium |
 | `entra-userCookie` | `user` | `contains` → `can authenticate as` → `has role on` | Low |
 
-#### Query 25: Comprehensive Deduplicated Path Count — Union All Patterns
+### Query 25: Comprehensive Deduplicated Path Count — Union All Patterns
 
 **Description**: Count unique (device, target) pairs across ALL attack path patterns (direct + group-mediated) for accurate deduplication  
 **Use Case**: Get accurate path counts that approximate what the Defender portal shows  
@@ -1220,11 +1422,11 @@ union ThreeHop, FourHop
 
 ---
 
-### SECTION 10: Attack Path Permission Analysis
+## SECTION 10: Attack Path Permission Analysis
 
 > These queries show not just that a path EXISTS, but what PERMISSIONS the attacker would gain. An attack path to Key Vault with `Reader` is very different from one with `Key Vault Secrets Officer`.
 
-#### Query 26: Permission Role Breakdown on Attack Paths
+### Query 26: Permission Role Breakdown on Attack Paths
 
 **Description**: Break down RBAC roles on attack path edges to show what permissions users actually have on target resources  
 **Use Case**: Distinguish low-risk (Reader) from critical (Owner/Secrets Officer) attack paths  
@@ -1274,7 +1476,7 @@ ExposureGraphEdges
 | 🟠 Contributor | High | Write access, can modify config |
 | 🟡 Reader | Low | Metadata only, cannot read secrets |
 
-#### Query 27: High-Privilege Users Reachable via Attack Paths
+### Query 27: High-Privilege Users Reachable via Attack Paths
 
 **Description**: Identify users with Owner, Contributor, or Secrets access to resources who are reachable from vulnerable devices  
 **Use Case**: Highest-priority remediation — these attack paths grant dangerous write/admin access  
@@ -1325,7 +1527,7 @@ ExposureGraphEdges
 | order by TargetCount desc
 ```
 
-#### Query 28: Critical Users (by Entra Criticality) Reachable from Vulnerable Devices
+### Query 28: Critical Users (by Entra Criticality) Reachable from Vulnerable Devices
 
 **Description**: Find users with high Entra ID criticality levels (Global Admins, Security Admins, etc.) who are reachable from devices with high-severity vulnerabilities  
 **Use Case**: THE most dangerous attack paths — compromising these users grants broad tenant-level access
@@ -1370,9 +1572,9 @@ ExposureGraphEdges
 
 ---
 
-### SECTION 11: Attack Path Entry Points & Choke Points
+## SECTION 11: Attack Path Entry Points & Choke Points
 
-#### Query 29: Top Entry-Point Devices by Blast Radius
+### Query 29: Top Entry-Point Devices by Blast Radius
 
 **Description**: Rank vulnerable devices by how many unique Azure resources an attacker could reach by compromising them  
 **Use Case**: Prioritize vulnerability remediation by actual impact — a device reaching 465 targets is more urgent than one reaching 10
@@ -1408,7 +1610,7 @@ ExposureGraphEdges
 | take 20
 ```
 
-#### Query 30: Choke Point Detection — Users in Most Attack Paths
+### Query 30: Choke Point Detection — Users in Most Attack Paths
 
 **Description**: Find users who appear as identity pivots in the most attack paths — these are choke points where remediation has maximum impact  
 **Use Case**: Locking down credentials for a top choke-point user blocks MANY attack paths at once
@@ -1454,13 +1656,13 @@ ExposureGraphEdges
 
 ---
 
-### SECTION 12: Azure Resource Graph — Pre-Computed Attack Paths
+## SECTION 12: Azure Resource Graph — Pre-Computed Attack Paths
 
 > **Two complementary data sources**: ExposureGraph (Sections 9-11 above) covers identity-based attack paths from devices through users to cloud resources. Azure Resource Graph covers **pre-computed cloud-native attack paths** from internet-exposed entry points to critical resources. Together they provide complete coverage.
 
 > **⚠️ Execution note**: These are NOT KQL queries for Advanced Hunting. They run via Azure CLI `az graph query` against the Azure Resource Graph.
 
-#### Query 31: All Pre-Computed Attack Paths from Azure Resource Graph
+### Query 31: All Pre-Computed Attack Paths from Azure Resource Graph
 
 **Description**: Retrieve all attack paths pre-computed by Microsoft Defender for Cloud  
 **Use Case**: Get named attack scenarios with descriptions, attack stories, and remediation guidance  
@@ -1491,7 +1693,7 @@ az graph query -q "
 
 > **Coverage**: ARG attack paths cover **cloud-only, internet-exposed** scenarios. They do NOT include device → identity → resource paths (those are in ExposureGraph). The "Device with high severity vulnerabilities..." paths visible in the Defender portal come from ExposureGraph, not ARG.
 
-#### Query 32: Attack Path Summary by Scenario with Instance Counts
+### Query 32: Attack Path Summary by Scenario with Instance Counts
 
 **Description**: Group pre-computed attack paths by scenario name with counts per scenario  
 **Use Case**: Quick overview of which attack path types exist and their prevalence  
@@ -1543,4 +1745,5 @@ The `graphComponent` field contains the full attack chain: source entity → int
 
 ---
 
-**Last Updated**: 2026-02-12
+**Last Updated:** 2026-04-11  
+**Author:** Security Investigation System

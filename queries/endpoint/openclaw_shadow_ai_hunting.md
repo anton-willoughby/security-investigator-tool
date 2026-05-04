@@ -5,6 +5,7 @@
 **Tables:** DeviceProcessEvents, DeviceNetworkEvents, DeviceFileEvents, DeviceCustomFileEvents, DeviceCustomScriptEvents, DeviceCustomImageLoadEvents, SecurityAlert  
 **Keywords:** openclaw, shadow AI, AI agent, telegram bot, node.js, npm, gateway, persistence, scheduled task, startup folder, clipboard access, self-hosted AI, process chain, C2, device pairing  
 **MITRE:** T1053.005, T1547.001, T1059.001, T1071.001, T1071.004, T1564.001, T1119, T1132, TA0003, TA0011  
+**Domains:** endpoint  
 **Timeframe:** Last 90 days (configurable)
 
 ---
@@ -65,6 +66,24 @@ Source: [move78ai/OpenClaw-Threat-Hunting](https://github.com/move78ai/OpenClaw-
 | Port `18789` | Network | Default gateway listener — may attract scanners/probes |
 
 ---
+
+## Quick Reference — Query Index
+
+| # | Query | Use Case | Key Table |
+|---|-------|----------|-----------|
+| 1 | [OpenClaw Process Execution Detection](#query-1-openclaw-process-execution-detection) | Detection | `DeviceProcessEvents` |
+| 2 | [OpenClaw Persistence Mechanisms](#query-2-openclaw-persistence-mechanisms) | Investigation | `DeviceProcessEvents` |
+| 3 | [OpenClaw Network Connections — External API Map](#query-3-openclaw-network-connections--external-api-map) | Investigation | `DeviceNetworkEvents` |
+| 4 | [ClawHavoc Supply Chain IOC Check](#query-4-clawhavoc-supply-chain-ioc-check) | Investigation | `DeviceFileEvents` + `DeviceNetworkEvents` |
+| 5 | [Fleet-Wide OpenClaw Spread Assessment](#query-5-fleet-wide-openclaw-spread-assessment) | Posture | `DeviceNetworkEvents` + multi |
+| 6 | [Gateway Port 18789 Exposure Scan](#query-6-gateway-port-18789-exposure-scan) | Investigation | `DeviceNetworkEvents` |
+| 7 | [Telegram Bot API Communication Pattern](#query-7-telegram-bot-api-communication-pattern) | Investigation | `DeviceNetworkEvents` |
+| 8 | [OpenClaw .openclaw Directory File Activity (CDC)](#query-8-openclaw-openclaw-directory-file-activity-cdc) | Investigation | `DeviceCustomFileEvents` |
+| 9 | [auth-profiles.json Token Rotation Tracking (CDC)](#query-9-auth-profilesjson-token-rotation-tracking-cdc) | Investigation | `DeviceCustomFileEvents` |
+| 10 | [OpenClaw AMSI Script Content Capture (CDC)](#query-10-openclaw-amsi-script-content-capture-cdc) | Investigation | `DeviceCustomScriptEvents` |
+| 11 | [Native Addon ImageLoad — Clipboard Access Module (CDC)](#query-11-native-addon-imageload--clipboard-access-module-cdc) | Investigation | `DeviceCustomImageLoadEvents` |
+| 12 | [OpenClaw Gateway Instance Timeline via Cron Job Files (CDC)](#query-12-openclaw-gateway-instance-timeline-via-cron-job-files-cdc) | Investigation | `DeviceCustomFileEvents` |
+
 
 ## Query 1: OpenClaw Process Execution Detection
 

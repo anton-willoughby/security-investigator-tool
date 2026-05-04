@@ -5,6 +5,7 @@
 **Tables:** AuditLogs  
 **Keywords:** credential, secret, certificate, key, password, app registration, service principal, ownership, consent, permission, persistence, ApplicationManagement  
 **MITRE:** T1098.001, T1136.003, T1550.001, TA0003  
+**Domains:** spn, admin  
 **Timeframe:** Last 90 days (configurable)
 
 ---
@@ -40,6 +41,18 @@ This collection of KQL queries monitors credential lifecycle events for Entra ID
 - KeyType `Password` = client secret; KeyType `AsymmetricX509Cert` = certificate
 
 ---
+
+## Quick Reference — Query Index
+
+| # | Query | Use Case | Key Table |
+|---|-------|----------|-----------|
+| 1 | [All Credential Changes — Full Detail (PRIMARY AUDIT)](#query-1-all-credential-changes--full-detail-primary-audit) | Investigation | `AuditLogs` |
+| 2 | [Human vs Automated Credential Changes (Summary)](#query-2-human-vs-automated-credential-changes-summary) | Dashboard | `AuditLogs` |
+| 3 | [New Application Registrations with Full Context](#query-3-new-application-registrations-with-full-context) | Investigation | `AuditLogs` |
+| 4 | [Application Ownership Changes](#query-4-application-ownership-changes) | Investigation | `AuditLogs` |
+| 5 | [Consent Grants & Permission Changes](#query-5-consent-grants--permission-changes) | Investigation | `AuditLogs` |
+| 6 | [All ApplicationManagement Activity — Operation Breakdown](#query-6-all-applicationmanagement-activity--operation-breakdown) | Dashboard | `AuditLogs` |
+
 
 ## Query 1: All Credential Changes — Full Detail (PRIMARY AUDIT)
 

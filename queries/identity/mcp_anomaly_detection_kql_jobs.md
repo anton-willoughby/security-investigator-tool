@@ -6,6 +6,7 @@
 **Tables:** MicrosoftGraphActivityLogs, AADNonInteractiveUserSignInLogs, SigninLogs, LAQueryLogs, CloudAppEvents, AzureActivity  
 **Keywords:** MCP, anomaly detection, KQL job, data lake, summary rule, Graph MCP, Sentinel MCP, Azure MCP, behavioral baseline, new endpoint, volume spike, sensitive API, off-hours, promote analytics tier  
 **MITRE:** TA0001, TA0003, TA0006, TA0007, TA0009, TA0010, T1078, T1098  
+**Domains:** admin  
 **Timeframe:** Rolling daily with 14-day baseline  
 
 ---
@@ -30,6 +31,17 @@ All jobs tested against real historical MCP telemetry. Results:
 4. **Cross-MCP identity mismatch** (Job 8): Sentinel Triage MCP's `AADObjectId` in LAQueryLogs is the MCP service principal's Object ID, not the end user's Entra Object ID. Graph+Azure correlation works correctly; Sentinel leg may not join by user identity.
 
 ---
+
+## Quick Reference — Query Index
+
+| # | Query | Use Case | Key Table |
+|---|-------|----------|-----------|
+| — | [Rule 1: New Sensitive Graph Endpoint via MCP](#rule-1-new-sensitive-graph-endpoint-via-mcp) | Detection | `LastActivity` + `MCPGraphAnomalies_KQL_CL` |
+| — | [Rule 2: MCP Volume Spike](#rule-2-mcp-volume-spike) | Dashboard | `LastActivity` + `MCPGraphAnomalies_KQL_CL` |
+| — | [Rule 3: Cross-MCP Suspicious Activity Chain](#rule-3-cross-mcp-suspicious-activity-chain) | Detection | `CrossMCPActivity` |
+| — | [Rule 4: New Azure MCP Server User](#rule-4-new-azure-mcp-server-user) | Detection | `LastActivity` |
+| — | [Rule 5: Large Data Retrieval via MCP](#rule-5-large-data-retrieval-via-mcp) | Detection | `LastActivity` |
+
 
 ## Overview
 

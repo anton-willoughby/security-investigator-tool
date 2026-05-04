@@ -2,9 +2,10 @@
 
 **Created:** 2026-02-11  
 **Platform:** Both  
-**Tables:** SigninLogs, AADSignInEventsBeta, AADUserRiskEvents, AuditLogs, SecurityAlert, SecurityIncident, OfficeActivity, CloudAppEvents, EmailEvents, UrlClickEvents, IdentityLogonEvents, DeviceEvents, AlertInfo, AlertEvidence  
-**Keywords:** AiTM, adversary-in-the-middle, token theft, session cookie, phishing resistant, FIDO2, passkey, Evilginx, token replay, BEC, MFA bypass, attack disruption, compliant network, Global Secure Access, token protection, CAE, continuous access evaluation  
+**Tables:** SigninLogs, EntraIdSignInEvents, AADUserRiskEvents, AuditLogs, SecurityAlert, SecurityIncident, OfficeActivity, CloudAppEvents, EmailEvents, UrlClickEvents, IdentityLogonEvents, DeviceEvents, AlertInfo, AlertEvidence  
+**Keywords:** AiTM, adversary-in-the-middle, token theft, session cookie, phishing resistant, FIDO2, passkey, Evilginx, token replay, BEC, MFA bypass, attack disruption, compliant network, Global Secure Access, token protection, CAE, continuous access evaluation, risky sign-in, anomaly, sign-in  
 **MITRE:** T1557, T1539, T1528, T1550.004, T1114.003, T1098, T1078, TA0006, TA0001, TA0009  
+**Domains:** identity, email  
 **Timeframe:** Last 30 days (configurable)
 
 ---
@@ -21,6 +22,33 @@ This document synthesizes intelligence from [Jeffrey Appel's 2026 AiTM guide](ht
 4. **Response playbook** for confirmed AiTM compromise
 
 ---
+
+## Quick Reference — Query Index
+
+**Investigation shortcuts:**
+- **User with anonymizedIPAddress or AiTM risk + phishing delivery** (TP Q3+Q8): **Q1** (SessionId multi-country replay via `EntraIdSignInEvents` — primary, ≤30d) → **if Q1 returns 0:** **Q2b** (cross-session multi-country OfficeHome — catches persistent credential theft with VPN rotation where attacker uses different sessions from different countries) → **Q3** (risk events correlated with phishing) → **Q5** (inbox rules during anomalous sessions). >30d fallback: **Q7** (Data Lake variant using `SigninLogs.SessionId` — same detection logic, longer retention)
+- **Post-AiTM compromise timeline** (TP Q3, incident follow-up): **Q4** (MFA method registration) → **Q10** (PIM elevation without re-auth) → **Q13** (cloud app reconnaissance)
+- **AiTM endpoint indicators** (TP Q3+Q8): **Q8** (URL click-through to phishing) → **Q9** (network protection blocks) → **Q11** (SmartScreen blocks)
+- **AiTM posture assessment:** See **Part 2** (defensive program)
+- **Response actions for confirmed AiTM:** See **Part 5** (response playbook)
+
+| # | Query | Use Case | Key Table |
+|---|-------|----------|-----------|
+| 1 | [AiTM Proxy Sign-In — OfficeHome Multi-Country Session (Advanced Hun...](#query-1-aitm-proxy-sign-in--officehome-multi-country-session-advanced-hunting) | Investigation | `EntraIdSignInEvents` |
+| 2 | [AiTM Proxy Sign-In — Sentinel Data Lake Variant](#query-2-aitm-proxy-sign-in--sentinel-data-lake-variant) | Investigation | `SigninLogs` |
+| 2 | [b: Cross-Session Multi-Country OfficeHome Access (Persistent Creden...](#query-2b-cross-session-multi-country-officehome-access-persistent-credential-theft) | Investigation | `EntraIdSignInEvents` |
+| 3 | [Anomalous Token Risk Events Correlated with Phishing Emails](#query-3-anomalous-token-risk-events-correlated-with-phishing-emails) | Detection | `AADUserRiskEvents` + `EmailEvents` |
+| 4 | [New MFA Method Registration After Suspicious Sign-In](#query-4-new-mfa-method-registration-after-suspicious-sign-in) | Investigation | `AADUserRiskEvents` + `AuditLogs` |
+| 5 | [Inbox Rules Created During Anomalous Token Sessions (Advanced Hunting)](#query-5-inbox-rules-created-during-anomalous-token-sessions-advanced-hunting) | Detection | `AlertInfo` + `CloudAppEvents` |
+| 6 | [Suspicious Inbox Rules for Forwarding/Redirect (Sentinel Data Lake)](#query-6-suspicious-inbox-rules-for-forwardingredirect-sentinel-data-lake) | Detection | `OfficeActivity` |
+| 7 | [Token Replay — Same SessionId from Multiple IPs/Countries (Data Lake)](#query-7-token-replay--same-sessionid-from-multiple-ipscountries-data-lake) | Investigation | `SigninLogs` |
+| 8 | [URL Click-Through to Phishing Sites](#query-8-url-click-through-to-phishing-sites) | Investigation | `UrlClickEvents` |
+| 9 | [Network Protection Events — AiTM Site Connection Attempts](#query-9-network-protection-events--aitm-site-connection-attempts) | Investigation | `DeviceEvents` |
+| 10 | [PIM Elevation Without Re-Authentication After AiTM](#query-10-pim-elevation-without-re-authentication-after-aitm) | Investigation | `AADUserRiskEvents` + `AuditLogs` |
+| 11 | [SmartScreen AiTM Phishing Blocks](#query-11-smartscreen-aitm-phishing-blocks) | Investigation | `DeviceEvents` |
+| 12 | [Comprehensive AiTM Alert Summary — Incident Correlation](#query-12-comprehensive-aitm-alert-summary--incident-correlation) | Dashboard | `SecurityAlert` + `SecurityIncident` |
+| 13 | [Post-AiTM Cloud App Reconnaissance](#query-13-post-aitm-cloud-app-reconnaissance) | Investigation | `AlertInfo` + `CloudAppEvents` |
+
 
 ## Part 1: AiTM Attack Anatomy
 
@@ -290,14 +318,14 @@ adaptation_notes: "Multi-let join query. CD supports `let` blocks. High-signal d
 // AiTM Detection: OfficeHome proxy sign-in with cross-country session replay
 // Platform: Defender XDR Advanced Hunting
 let OfficeHomeSessionIds = 
-AADSignInEventsBeta
+EntraIdSignInEvents
 | where Timestamp > ago(7d)
 | where ErrorCode == 0
 | where ApplicationId == "4765445b-32c6-49b0-83e6-1d93765276ca" // OfficeHome application 
 | where ClientAppUsed == "Browser" 
 | where LogonType has "interactiveUser" 
 | summarize arg_min(Timestamp, Country) by SessionId;
-AADSignInEventsBeta
+EntraIdSignInEvents
 | where Timestamp > ago(7d)
 | where ApplicationId != "4765445b-32c6-49b0-83e6-1d93765276ca"
 | where ClientAppUsed == "Browser" 
@@ -346,6 +374,71 @@ SigninLogs
     OriginalCountry = Country, ReplayCountry = OtherCountry, OriginalRequestId
 | order by OtherTimestamp desc
 ```
+
+### Query 2b: Cross-Session Multi-Country OfficeHome Access (Persistent Credential Theft)
+
+Supplements Q1/Q2 by detecting attackers who authenticate from **different VPN/proxy nodes across sessions** rather than replaying the same session cross-country. Q1/Q2 detect the classic EvilGinx pattern (same SessionId, two countries). This query catches **persistent credential theft** where the attacker rotates VPN/proxy infrastructure across sessions — each node produces its own SessionId, so within-session cross-country checks never trigger.
+
+<!-- cd-metadata
+cd_ready: false
+adaptation_notes: "Cross-session aggregation query — summarizes OfficeHome country distribution per user. Not suitable for CD: requires threshold tuning (3+ countries) and may flag legitimate global travelers. Use as triage query after Q1/Q2 return 0 but Identity Protection flags exist."
+-->
+
+**Advanced Hunting variant (≤30d):**
+```kql
+// Cross-session multi-country OfficeHome detection
+// Catches persistent credential theft with VPN/proxy rotation
+// Platform: Defender XDR Advanced Hunting
+EntraIdSignInEvents
+| where Timestamp > ago(30d)
+| where ErrorCode == 0
+| where ApplicationId == "4765445b-32c6-49b0-83e6-1d93765276ca" // OfficeHome
+| summarize 
+    Countries = make_set(Country),
+    CountryCount = dcount(Country),
+    IPs = make_set(IPAddress, 20),
+    UniqueIPs = dcount(IPAddress),
+    Sessions = dcount(SessionId),
+    SignIns = count(),
+    FirstSeen = min(Timestamp),
+    LastSeen = max(Timestamp)
+    by AccountUpn
+| where CountryCount >= 3  // 3+ countries on OfficeHome is suspicious
+| order by CountryCount desc, UniqueIPs desc
+```
+
+**Sentinel Data Lake variant (90d+):**
+```kql
+// Cross-session multi-country OfficeHome detection
+// Platform: Sentinel Data Lake (longer retention for historical analysis)
+let OfficeHomeAppId = "4765445b-32c6-49b0-83e6-1d93765276ca";
+SigninLogs
+| where TimeGenerated > ago(90d)
+| where ResultType == 0
+| where AppId == OfficeHomeAppId
+| extend Country = tostring(parse_json(LocationDetails).countryOrRegion)
+| summarize 
+    Countries = make_set(Country),
+    CountryCount = dcount(Country),
+    IPs = make_set(IPAddress, 20),
+    UniqueIPs = dcount(IPAddress),
+    Sessions = dcount(OriginalRequestId),
+    SignIns = count(),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated)
+    by UserPrincipalName
+| where CountryCount >= 3
+| order by CountryCount desc, UniqueIPs desc
+```
+
+**Interpretation:**
+- **3–4 countries:** Cross-reference with `AADUserRiskEvents` for `anonymizedIPAddress` or `aiCompoundAccountRisk`. May be legitimate travel if IPs are residential/corporate
+- **5+ countries with VPN/Tor IPs:** High confidence persistent credential theft. Check inbox rules via Q5/Q6
+- **Correlation:** If user appears in Q3 or Q5/Q6, escalate to confirmed compromise
+
+**Entity substitution:** Add `| where AccountUpn =~ "<UPN>"` (AH) or `| where UserPrincipalName =~ "<UPN>"` (Data Lake) for single-user investigation.
+
+---
 
 ### Query 3: Anomalous Token Risk Events Correlated with Phishing Emails
 
@@ -439,14 +532,15 @@ AlertInfo
 | where Title == "Anomalous Token"
 | join (AlertEvidence 
     | where Timestamp > ago(7d) 
-    | where EntityType == "CloudLogonSession") on AlertId
-| project sessionId = todynamic(AdditionalFields).SessionId);
+    | where EntityType == "CloudLogonSession"
+    | project AlertId, AdditionalFields) on AlertId
+| project sessionId = tostring(parse_json(AdditionalFields).SessionId));
 let hasSuspiciousSessionIds = isnotempty(toscalar(suspiciousSessionIds));
 CloudAppEvents
-| where hasSuspiciousSessionIds
 | where Timestamp > ago(21d)
+| where hasSuspiciousSessionIds
 | where ActionType == "New-InboxRule"
-| where RawEventData.SessionId in (suspiciousSessionIds)
+| where tostring(parse_json(tostring(RawEventData)).SessionId) in (suspiciousSessionIds)
 ```
 
 ### Query 6: Suspicious Inbox Rules for Forwarding/Redirect (Sentinel Data Lake)
@@ -463,7 +557,7 @@ impactedAssets:
     identifier: "accountUpn"
   - type: "mailbox"
     identifier: "accountUpn"
-adaptation_notes: "Sentinel Data Lake (OfficeActivity). Row-level events with clear exfiltration indicators. `Parameters` is a string field — use `has` for keyword matching."
+adaptation_notes: "OfficeActivity is queryable via AH when LA workspace is connected to unified Defender portal (use TimeGenerated, not Timestamp). Row-level events with clear exfiltration indicators. `Parameters` is a string field — use `has` for keyword matching."
 -->
 ```kql
 // Post-AiTM BEC: Email exfiltration via forwarding rules
@@ -482,19 +576,22 @@ OfficeActivity
 | order by TimeGenerated desc
 ```
 
-### Query 7: Token Replay — Same SessionId from Multiple IPs/Countries
+### Query 7: Token Replay — Same SessionId from Multiple IPs/Countries (Data Lake)
 
-Detects token replay by identifying sessions used from geographically dispersed locations.
+Data Lake equivalent of Q1's SessionId-based token replay detection. Uses `SigninLogs.SessionId` for >30d lookback beyond AH's 30-day retention cap. `SigninLogs` has the same `SessionId` column as `EntraIdSignInEvents`.
+
+> **Q1 vs Q7:** Both use `SessionId` for session-level grouping. Q1 (`EntraIdSignInEvents`) is preferred for ≤30d because AH is free for Analytics-tier tables. Q7 (`SigninLogs` via Data Lake) is for >30d lookback or when AH is unavailable.
 
 <!-- cd-metadata
 cd_ready: false
-adaptation_notes: "Aggregation query — summarizes per SessionId with `dcount(IPAddress) > 1` threshold. Output is one row per session, not per event. Would require restructuring to produce row-level alerts for CD."
+adaptation_notes: "Aggregation query — summarizes per SessionId with `dcount(IPAddress) > 1` threshold. Output is one row per session, not per event. Would require restructuring to produce row-level alerts for CD. Fixed: previously grouped by OriginalRequestId (per-request) instead of SessionId (per-session), missing all multi-country token replay patterns."
 -->
 ```kql
 // AiTM Token Replay: Same session used from multiple locations
 // Platform: Sentinel Data Lake
+// NOTE: Groups by SessionId (session-level), NOT OriginalRequestId (per-request)
 SigninLogs
-| where TimeGenerated > ago(7d)
+| where TimeGenerated > ago(30d)
 | where ResultType == 0
 | extend Country = tostring(parse_json(LocationDetails).countryOrRegion)
 | extend City = tostring(parse_json(LocationDetails).city)
@@ -503,16 +600,16 @@ SigninLogs
     DistinctCountries = dcount(Country),
     Countries = make_set(Country),
     Cities = make_set(City),
-    IPs = make_set(IPAddress),
+    IPs = make_set(IPAddress, 10),
+    Apps = make_set(AppDisplayName, 5),
     FirstSeen = min(TimeGenerated),
     LastSeen = max(TimeGenerated),
     SignInCount = count()
-    by UserPrincipalName, OriginalRequestId
-| where DistinctIPs > 1 and DistinctCountries > 1
+    by UserPrincipalName, SessionId
+| where DistinctCountries > 1
 | extend SessionDuration = LastSeen - FirstSeen
-| where SessionDuration < 1h // Short sessions with multi-country = high confidence
-| project UserPrincipalName, OriginalRequestId, Countries, Cities, 
-    IPs, DistinctIPs, DistinctCountries, SessionDuration, SignInCount
+| project UserPrincipalName, SessionId, Countries, Cities, 
+    IPs, Apps, DistinctIPs, DistinctCountries, SessionDuration, SignInCount
 | order by DistinctCountries desc, DistinctIPs desc
 ```
 
